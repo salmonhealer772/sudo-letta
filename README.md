@@ -14,7 +14,7 @@
 ## Quick Start
 
 ```bash
-git clone https://github.com/<your>/sudo-letta.git && cd sudo-letta
+git clone https://github.com/salmonhealer772/sudo-letta.git && cd sudo-letta
 bash setup.sh              # builds image, asks for API key once
 ```
 
