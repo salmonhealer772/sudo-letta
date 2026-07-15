@@ -18,11 +18,11 @@ RUN apt-get update && \
     curl \
     git \
     python3 \
-    python-is-python3 \
+    python3-pip \
     ripgrep \
     ffmpeg \
     openssh-client \
-    docker-cli \
+    docker.io \
     xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
