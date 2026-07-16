@@ -37,6 +37,6 @@ if [[ "$STATUS" != "running" ]]; then
   exit 1
 fi
 
-# Exec into the container running Letta Code
-# --resume picks up the last conversation or shows agent selector
-docker exec -it -u node "sudo-$NAME" letta --resume
+# Exec into the container and open the Letta Code TUI
+# Running as node (Letta's user) — the TUI lets you create/resume agents
+docker exec -it -u node "sudo-$NAME" letta
