@@ -1,4 +1,4 @@
-# sudo-letta — Letta Code with root access inside Docker
+# sudo-letta — Letta Code with full root inside a privileged container
 FROM node:22-bookworm-slim
 
 LABEL sudo-letta="true" description="Letta Code with sudo + native memory"

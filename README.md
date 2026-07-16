@@ -1,13 +1,14 @@
 # sudo-letta
 
-**One command. Letta Code with root inside its container. Zero escape.**
+**One command. Letta Code with full root inside a privileged container.**
 
 ## What It Does
 
 - **Native memory** — Letta Code remembers everything out of the box. No patches, no hacks. MemFS tracks all context in git.
 - **Auto-learning** — agents rewrite their own memory blocks, skills, and prompts over time. They actually get smarter with use.
 - **Full sudo** — the agent has root access inside its own container. Can `apt install`, `sudo` anything, edit configs, do whatever it wants.
-- **Zero escape** — cannot reach the host. Even with full sudo, Docker is the boundary. Nothing leaves the container.
+- **Privileged mode** — containers run with `--privileged` so the agent can do anything inside its box (mount, kernel features, etc.).
+- **Caveat emptor** — privileged containers have a direct path to the host kernel. This is by design (agent needs full control), but if the agent goes rogue it could potentially escape. The Docker cgroup is the only barrier.
 - **Multi-agent** — run alice, bob, charlie in parallel. Each gets its own container, brain, memory, and sudo password.
 - **CLI in the container** — git, docker-cli, openssh, python, node, ripgrep, ffmpeg, curl. Full terminal.
 
@@ -40,11 +41,11 @@ Bring it down → remembers everything. Bring it up → where you left off.
 
 ## Security Model
 
-| Boundary | Access |
-|---|---|
-| Inside container | Full root. `sudo` anything, install packages, modify configs, destroy itself. |
-| Outside (host) | **None.** Docker is the cage. Agent cannot touch the host. |
-| Between containers | **None.** alice can't see bob's volume or processes. |
+| Boundary | Access | Risk |
+|---|---|---|
+| Inside container | Full root. `sudo` anything, install packages, mount filesystems, load kernel modules. | By design — agent needs full control. |
+| Outside (host) | **Soft barrier.** Docker + `--privileged` = the kernel is the only separation. A compromised agent could exploit kernel CVEs, use `--pid=host`-style escapes, or abuse cgroup bypasses. | **Real.** This is not a hardened sandbox. |
+| Between containers | **None.** alice can't see bob's volume or processes (separate containers). | Low — but a privileged agent could attack the host and reach others. |
 
 The sudo password is random 16-char alphanumeric, generated on first `up.sh`, saved to `~/.sudo-letta/.env`. The agent gets it via env var.
 
