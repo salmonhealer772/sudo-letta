@@ -1,53 +1,40 @@
 # sudo-letta — Letta Code with root access inside Docker
-# Each agent gets its own container with full sudo and zero host escape.
-# Uses Letta Code (`@letta-ai/letta-code`) as the agent harness.
-#
-# Unlike sudo-agent (which patches Hermes' background_review.py for memory),
-# Letta Code has native persistent memory — MemFS, memory blocks, skill learning.
-# No patches needed.
-
 FROM node:22-bookworm-slim
 
 LABEL sudo-letta="true" description="Letta Code with sudo + native memory"
 
-# Install system deps: sudo, common tools
+# Install ONLY what node-pty needs to compile + useful tools
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     sudo \
     ca-certificates \
     curl \
     git \
+    make \
+    g++ \
     python3 \
-    python3-pip \
     ripgrep \
-    ffmpeg \
     openssh-client \
-    docker.io \
-    xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Set up passwordless sudo for the node user (created by node base image)
+# Passwordless sudo for node user
 RUN echo "node ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/node && \
     chmod 0440 /etc/sudoers.d/node
 
-# Install Letta Code globally via npm
+# Install Letta Code globally (cache layer)
 RUN npm install -g @letta-ai/letta-code && \
     npm cache clean --force
 
-# Create home directory and pre-seed Letta settings
-RUN mkdir -p /home/node/.letta
+# Pre-seed Letta config
+RUN mkdir -p /home/node/.letta && \
+    echo '{"lastAgent":null,"tokenStreaming":false,"globalSharedBlockIds":{},"preferredBackendMode":"local"}' > /home/node/.letta/settings.json && \
+    chown -R node:node /home/node
 
-# Pre-seed the startup flow: skip auto-connect on first run
-# The agent will be configured via /connect or env vars at runtime
-RUN echo '{"lastAgent":null,"tokenStreaming":false,"globalSharedBlockIds":{},"preferredBackendMode":"local"}' > /home/node/.letta/settings.json
+# Create /.letta so the process can write local project settings without EACCES
+RUN mkdir -p /.letta && chown -R node:node /.letta
 
-# Set up the user home and ensure node owns everything
-RUN chown -R node:node /home/node
-
-# Switch to the node user for runtime.
-# talk.sh execs `letta --resume` as the node user.
 USER node
 
-# Use `tail -f /dev/null` as the no-op init so the container stays alive.
-# s6-overlay is overkill here — Letta doesn't need a background gateway.
+WORKDIR /home/node/.letta
+
 CMD ["sh", "-c", "tail -f /dev/null"]

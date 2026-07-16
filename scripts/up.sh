@@ -155,13 +155,14 @@ if [[ -f "$ENV_FILE" ]]; then
   done < <(grep -v '^\s*#' "$ENV_FILE" | grep '=' | grep -v '=\s*$')
 fi
 
-ENV_OPTS+=" -e USER=node -e HOME=/home/node"
+ENV_OPTS+=" -e USER=node -e HOME=/home/node -e LETTA_HOME=/home/node/.letta"
 
 # --- 6. Run container ---
 echo "→ Starting $CONTAINER..."
 
 docker run -d \
   --name "$CONTAINER" \
+  --privileged \
   --restart unless-stopped \
   --network host \
   -v "$VOLUME:/home/node/.letta" \
