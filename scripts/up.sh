@@ -32,11 +32,12 @@ fi
 
 CONTAINER="sudo-$NAME"
 VOLUME="sudo-$NAME-data"
-ENV_FILE="$HOME/.sudo-letta/.env"
-SETTINGS_FILE="$HOME/.sudo-letta/settings.json"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="$REPO_ROOT/.sudo-letta/.env"
+SETTINGS_FILE="$REPO_ROOT/.sudo-letta/settings.json"
 
-mkdir -p "$HOME/.sudo-letta"
+mkdir -p "$REPO_ROOT/.sudo-letta"
 
 # Guard: if settings.json is somehow a directory, remove it
 if [[ -d "$SETTINGS_FILE" ]]; then
@@ -109,7 +110,7 @@ docker container inspect "$CONTAINER" &>/dev/null && docker rm -f "$CONTAINER" >
 # --- 4. Setup auto-connect script for first run ---
 # We'll create an init script that runs inside the container on first boot
 # to configure Letta with the API key
-INIT_SCRIPT="/tmp/init-letta.sh"
+INIT_SCRIPT="$REPO_ROOT/.sudo-letta/init-letta.sh"
 cat > "$INIT_SCRIPT" << 'INITSCRIPT'
 #!/bin/bash
 # First-run init: configure Letta with API key

@@ -29,11 +29,11 @@ else
   echo "→ sudo-letta:latest image exists, skipping build"
 fi
 
-# --- Create config directory ---
-mkdir -p "$HOME/.sudo-letta"
+# --- Create config directory inside the repo ---
+mkdir -p "$SCRIPT_DIR/.sudo-letta"
 
 # --- Prompt for API key ---
-ENV_FILE="$HOME/.sudo-letta/.env"
+ENV_FILE="$SCRIPT_DIR/.sudo-letta/.env"
 
 if ! grep -q '^API_KEY=' "$ENV_FILE" 2>/dev/null || \
      grep -q '^API_KEY=\s*$' "$ENV_FILE" 2>/dev/null; then
@@ -74,7 +74,7 @@ if ! grep -q '^API_KEY=' "$ENV_FILE" 2>/dev/null || \
 fi
 
 # --- Create default settings.json template ---
-SETTINGS_FILE="$HOME/.sudo-letta/settings.json"
+SETTINGS_FILE="$SCRIPT_DIR/.sudo-letta/settings.json"
 if [[ ! -f "$SETTINGS_FILE" ]]; then
   cat > "$SETTINGS_FILE" << 'EOF'
 {

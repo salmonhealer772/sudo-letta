@@ -47,7 +47,7 @@ Bring it down → remembers everything. Bring it up → where you left off.
 | Outside (host) | **Soft barrier.** Docker + `--privileged` = the kernel is the only separation. A compromised agent could exploit kernel CVEs, use `--pid=host`-style escapes, or abuse cgroup bypasses. | **Real.** This is not a hardened sandbox. |
 | Between containers | **None.** alice can't see bob's volume or processes (separate containers). | Low — but a privileged agent could attack the host and reach others. |
 
-The sudo password is random 16-char alphanumeric, generated on first `up.sh`, saved to `~/.sudo-letta/.env`. The agent gets it via env var.
+The sudo password is random 16-char alphanumeric, generated on first `up.sh`, saved to `.sudo-letta/.env` (inside the repo directory). The agent gets it via env var.
 
 `--ALL` is reserved for `rm-containers.sh`. No script accepts `--all` as a container name.
 
