@@ -168,6 +168,7 @@ docker run -d \
   --network host \
   -v "$VOLUME:/home/node/.letta" \
   -v "$ENV_FILE:/env/.env:ro" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   $ENV_OPTS \
   sudo-letta:latest
 
