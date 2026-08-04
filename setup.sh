@@ -30,7 +30,17 @@ else
 fi
 
 # --- Create config directory inside the repo ---
-mkdir -p "$SCRIPT_DIR/.sudo-letta"
+# Detect if dir is root-owned and use sudo if needed
+_writable() { echo "" >> "$1" 2>/dev/null; }
+
+if ! _writable "$SCRIPT_DIR/.sudo-letta/.env"; then
+  USE_SUDO=true
+  echo "→ Repo is root-owned. Using sudo to save credentials..."
+  sudo mkdir -p "$SCRIPT_DIR/.sudo-letta"
+else
+  USE_SUDO=false
+  mkdir -p "$SCRIPT_DIR/.sudo-letta"
+fi
 
 # --- Prompt for API key ---
 ENV_FILE="$SCRIPT_DIR/.sudo-letta/.env"
@@ -57,16 +67,28 @@ if ! grep -q '^API_KEY=' "$ENV_FILE" 2>/dev/null || \
     exit 1
   fi
 
-  echo "" >> "$ENV_FILE"
-  echo "# sudo-letta config (set by setup.sh)" >> "$ENV_FILE"
-  echo "LLM_PROVIDER=$PROVIDER" >> "$ENV_FILE"
-  echo "API_KEY=$API_KEY" >> "$ENV_FILE"
+  if $USE_SUDO; then
+    {
+      echo "# sudo-letta config (set by setup.sh)"
+      echo "LLM_PROVIDER=$PROVIDER"
+      echo "API_KEY=$API_KEY"
+    } | sudo tee "$ENV_FILE" > /dev/null
+  else
+    echo "" >> "$ENV_FILE"
+    echo "# sudo-letta config (set by setup.sh)" >> "$ENV_FILE"
+    echo "LLM_PROVIDER=$PROVIDER" >> "$ENV_FILE"
+    echo "API_KEY=$API_KEY" >> "$ENV_FILE"
+  fi
 
   # If it's an OpenAI-compatible provider, ask for base URL
   if [[ "$PROVIDER" != "anthropic" && "$PROVIDER" != "chatgpt" ]]; then
     read -r -p "Base URL (e.g. https://api.deepseek.com/v1) [leave blank for default]: " BASE_URL
     if [[ -n "$BASE_URL" ]]; then
-      echo "LLM_BASE_URL=$BASE_URL" >> "$ENV_FILE"
+      if $USE_SUDO; then
+        echo "LLM_BASE_URL=$BASE_URL" | sudo tee -a "$ENV_FILE" > /dev/null
+      else
+        echo "LLM_BASE_URL=$BASE_URL" >> "$ENV_FILE"
+      fi
     fi
   fi
 
@@ -76,7 +98,8 @@ fi
 # --- Create default settings.json template ---
 SETTINGS_FILE="$SCRIPT_DIR/.sudo-letta/settings.json"
 if [[ ! -f "$SETTINGS_FILE" ]]; then
-  cat > "$SETTINGS_FILE" << 'EOF'
+  if $USE_SUDO; then
+    sudo tee "$SETTINGS_FILE" > /dev/null << 'EOF'
 {
   "tokenStreaming": true,
   "preferredBackendMode": "local",
@@ -88,6 +111,20 @@ if [[ ! -f "$SETTINGS_FILE" ]]; then
   }
 }
 EOF
+  else
+    cat > "$SETTINGS_FILE" << 'EOF'
+{
+  "tokenStreaming": true,
+  "preferredBackendMode": "local",
+  "globalSharedBlockIds": {},
+  "permissions": {
+    "bash": "allow",
+    "read": "allow",
+    "write": "allow"
+  }
+}
+EOF
+  fi
   echo "✓ Created $SETTINGS_FILE"
 fi
 
