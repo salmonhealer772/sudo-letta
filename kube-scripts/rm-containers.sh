@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# kube-scripts/rm-containers.sh — Remove sudo-letta deployments + PVCs
+# Usage:
+#   bash kube-scripts/rm-containers.sh --name     Remove one
+#   bash kube-scripts/rm-containers.sh --ALL       Nuke ALL sudo-*
+
+# Auto-detect kubeconfig
+if [[ -z "${KUBECONFIG:-}" ]]; then
+  for cfg in "/etc/rancher/k3s/k3s.yaml" "/home/world15/.kube/config" "$HOME/.kube/config"; do
+    if [[ -f "$cfg" ]]; then export KUBECONFIG="$cfg"; break; fi
+  done
+fi
+
+NAME=""
+REMOVE_ALL=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --name|--name=*)
+      if [[ "$1" == --name=* ]]; then
+        NAME="${1#--name=}"
+      else
+        shift; NAME="${1:-}"
+      fi
+      ;;
+    --ALL|--all)  REMOVE_ALL=true ;;
+    *)            echo "Usage: bash kube-scripts/rm-containers.sh --name | --ALL" >&2; exit 1 ;;
+  esac
+  shift
+done
+
+if $REMOVE_ALL; then
+  echo "→ Nuking ALL sudo-* from Kubernetes..."
+  kubectl delete deploy -l app=sudo-letta 2>/dev/null || true
+  kubectl delete pvc -l app=sudo-letta 2>/dev/null || true
+  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+  rm -f "$REPO_DIR/deployments"/*.yaml 2>/dev/null || true
+  echo "✓ Gone."
+elif [[ -n "$NAME" ]]; then
+  DEPLOY="sudo-$NAME"
+  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+  if kubectl get deploy "$DEPLOY" &>/dev/null; then
+    kubectl delete deploy "$DEPLOY"
+    kubectl delete pvc "$DEPLOY-data" 2>/dev/null || true
+    rm -f "$REPO_DIR/deployments/$NAME.yaml" 2>/dev/null || true
+    echo "✓ $DEPLOY removed (deployment + volume)."
+  else
+    echo "→ $DEPLOY not found."
+  fi
+else
+  echo "Usage: bash kube-scripts/rm-containers.sh --name | --ALL" >&2
+  exit 1
+fi
