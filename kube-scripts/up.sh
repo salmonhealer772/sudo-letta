@@ -181,6 +181,43 @@ fi
 
 echo ""
 echo "✓ $DEPLOY deployed"
+
+# ── Wait for pod and configure Letta ──
+echo "→ Waiting for pod to be ready..."
+kubectl wait --for=condition=ready pod -l agent=$NAME --timeout=60s 2>/dev/null || true
+
+echo "→ Configuring Letta provider..."
+POD=$(kubectl get pods -l agent=$NAME -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+if [[ -n "$POD" ]]; then
+  # Source env for Letta connect
+  CONNECT_CMD="letta connect $LLM_PROVIDER --api-key $API_KEY"
+  [[ -n "${LLM_BASE_URL:-}" ]] && CONNECT_CMD="$CONNECT_CMD --base-url $LLM_BASE_URL"
+
+  kubectl exec "$POD" -- bash -c "$CONNECT_CMD" 2>&1 | tail -3 || echo "⚠ Letta connect failed (may need manual config)"
+
+  # Create settings with permissions
+  kubectl exec "$POD" -- bash -c '
+    SETTINGS_FILE="/home/node/.letta/settings.json"
+    mkdir -p "$(dirname "$SETTINGS_FILE")"
+    if [ ! -f "$SETTINGS_FILE" ] || [ ! -s "$SETTINGS_FILE" ]; then
+      cat > "$SETTINGS_FILE" << "SETTINGS"
+{
+  "tokenStreaming": true,
+  "preferredBackendMode": "local",
+  "globalSharedBlockIds": {},
+  "permissions": {
+    "bash": "allow",
+    "read": "allow",
+    "write": "allow"
+  }
+}
+SETTINGS
+      chown node:node "$SETTINGS_FILE"
+    fi
+  ' 2>/dev/null || true
+
+  echo "→ Letta configured"
+fi
 echo "  Talk:   kubectl exec -it deploy/$DEPLOY -- bash -c 'letta'"
 echo "  Shell:  kubectl exec -it deploy/$DEPLOY -- bash"
 echo "  Logs:   kubectl logs deploy/$DEPLOY -f"
