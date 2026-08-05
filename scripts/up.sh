@@ -133,7 +133,7 @@ fi
 
 # Configure Letta provider based on env vars using non-interactive connect
 if [[ -n "${LLM_PROVIDER:-}" && -n "${API_KEY:-}" ]]; then
-  CONNECT_CMD="letta connect $LLM_PROVIDER --api-key $API_KEY"
+  CONNECT_CMD="letta --backend local connect $LLM_PROVIDER --api-key $API_KEY"
   if [[ -n "${LLM_BASE_URL:-}" ]]; then
     CONNECT_CMD="$CONNECT_CMD --base-url $LLM_BASE_URL"
   fi

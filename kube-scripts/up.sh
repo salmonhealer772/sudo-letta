@@ -190,7 +190,7 @@ echo "→ Configuring Letta provider..."
 POD=$(kubectl get pods -l agent=$NAME -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 if [[ -n "$POD" ]]; then
   # Source env for Letta connect
-  CONNECT_CMD="letta connect $LLM_PROVIDER --api-key $API_KEY"
+  CONNECT_CMD="letta --backend local connect $LLM_PROVIDER --api-key $API_KEY"
   [[ -n "${LLM_BASE_URL:-}" ]] && CONNECT_CMD="$CONNECT_CMD --base-url $LLM_BASE_URL"
 
   kubectl exec "$POD" -- bash -c "$CONNECT_CMD" 2>&1 | tail -3 || echo "⚠ Letta connect failed (may need manual config)"
