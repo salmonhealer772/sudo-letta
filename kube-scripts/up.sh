@@ -30,6 +30,10 @@ YAML_DIR="$REPO_DIR/deployments"
 DEPLOY="sudo-$NAME"
 YAML="$YAML_DIR/$NAME.yaml"
 
+# Hostname used for the pod's /etc/hosts hostAliases entry — lets sudo resolve the
+# host's own hostname (avoids `sudo: unable to resolve host <name>` under hostNetwork).
+NODE_HOSTNAME="$(hostname)"
+
 # If repo is root-owned and we're not root, bail early
 if [[ ! -w "$REPO_DIR" ]] && [[ "$(id -u)" != "0" ]]; then
   echo "Repo is root-owned. Run with: sudo bash kube-scripts/up.sh --$NAME" >&2
@@ -57,7 +61,6 @@ if [[ -f "$ENV_FILE" ]] && [[ -r "$ENV_FILE" ]]; then
   LLM_PROVIDER=$(grep '^LLM_PROVIDER=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- | head -1 || true)
   API_KEY=$(grep '^API_KEY=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- | head -1 || true)
   LLM_BASE_URL=$(grep '^LLM_BASE_URL=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- | head -1 || true)
-  SUDO_PASS=$(grep '^SUDO_PASSWORD=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- | head -1 || true)
 fi
 
 # Prompt for credentials if missing
@@ -66,13 +69,10 @@ if [[ -z "${LLM_PROVIDER:-}" || -z "${API_KEY:-}" ]]; then
   exit 1
 fi
 
-# Generate sudo password if missing
-if [[ -z "${SUDO_PASS:-}" ]]; then
-  SUDO_PASS=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
-  mkdir -p "$(dirname "$ENV_FILE")"
-  echo "SUDO_PASSWORD=$SUDO_PASS" >> "$ENV_FILE"
-  echo "→ Generated sudo password: $SUDO_PASS"
-fi
+# NOTE: SUDO_PASSWORD was intentional dead code and has been removed. The `node`
+# account is locked and sudo elevation is via the NOPASSWD sudoers rule
+# (/etc/sudoers.d/node) only — no password is ever set, so the SUDO_PASSWORD env
+# var never did anything.
 
 # ── Generate YAML ──
 # Build env lines for YAML
@@ -85,8 +85,6 @@ ENV_YAML="        - name: LLM_PROVIDER
           value: \"${LLM_BASE_URL}\""
 
 ENV_YAML+="
-        - name: SUDO_PASSWORD
-          value: \"${SUDO_PASS}\"
         - name: USER
           value: \"node\"
         - name: HOME
@@ -129,6 +127,10 @@ spec:
         agent: $NAME
     spec:
       hostNetwork: true
+      hostAliases:
+      - ip: "127.0.0.1"
+        hostnames:
+        - "$NODE_HOSTNAME"
       containers:
       - name: sudo-letta
         image: sudo-letta:latest

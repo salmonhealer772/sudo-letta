@@ -25,4 +25,4 @@ if [[ -z "${KUBECONFIG:-}" ]]; then
   done
 fi
 
-kubectl exec -it "deploy/sudo-$NAME" -- bash
+kubectl exec -it "deploy/sudo-$NAME" --user root -- bash
