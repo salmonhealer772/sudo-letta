@@ -25,4 +25,4 @@ if [[ -z "${KUBECONFIG:-}" ]]; then
   done
 fi
 
-kubectl exec -it "deploy/sudo-$NAME" -- sudo -i
+kubectl exec -it "deploy/sudo-$NAME" -- sudo --preserve-env=LETTA_API_KEY,API_KEY,LLM_PROVIDER,LETTA_HOME -i
