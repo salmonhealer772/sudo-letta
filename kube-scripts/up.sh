@@ -79,6 +79,8 @@ fi
 ENV_YAML="        - name: LLM_PROVIDER
           value: \"${LLM_PROVIDER}\"
         - name: API_KEY
+          value: \"${API_KEY}\"
+        - name: LETTA_API_KEY
           value: \"${API_KEY}\""
 [[ -n "${LLM_BASE_URL:-}" ]] && ENV_YAML+="
         - name: LLM_BASE_URL
