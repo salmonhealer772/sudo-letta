@@ -104,7 +104,33 @@ def main():
     ap.add_argument("prompt", nargs="*", help="the message to send (if omitted, read from stdin)")
     ap.add_argument("--json", action="store_true", dest="as_json", help="request JSON output")
     ap.add_argument("--list", action="store_true", help="list running sudo-letta agents")
-    args = ap.parse_args()
+    ap.add_argument("--name", dest="name_flag", help="agent name (alt spelling for --NAME)")
+
+    # Accept a bare leading-dash agent name like --mail-bot-letta (matching the
+    # ssh.sh/up.sh --name convention). argparse would otherwise treat it as an
+    # unknown option, so preprocess argv: every name spelling is normalized to a
+    # bare positional. (Passing the name via a separate --name flag would let the
+    # greedy `name` positional swallow the first prompt token, so we flatten all
+    # name forms into the `name` positional and leave `prompt` intact.)
+    KNOWN_FLAGS = {"--json", "--list", "--help", "-h"}
+    pre = []
+    argv = sys.argv[1:]
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--name" and i + 1 < len(argv):
+            pre.append(argv[i + 1])            # --name X  -> X
+            i += 2
+        elif tok.startswith("--name="):
+            pre.append(tok[len("--name="):])   # --name=X -> X
+            i += 1
+        elif tok.startswith("--") and tok not in KNOWN_FLAGS:
+            pre.append(tok.lstrip("-"))        # --mail-bot-letta -> mail-bot-letta
+            i += 1
+        else:
+            pre.append(tok)
+            i += 1
+    args = ap.parse_args(pre)
 
     if args.list:
         agents = list_agents()
@@ -115,7 +141,12 @@ def main():
             print(a)
         return
 
-    if not args.name:
+    name = (args.name_flag or args.name or "").strip()
+    # Normalize away a single leading "sudo-" (users may type --sudo-mail-bot-letta);
+    # run_prompt() prepends "sudo-" itself, so this avoids "sudo-sudo-<name>".
+    if name.startswith("sudo-"):
+        name = name[len("sudo-"):]
+    if not name:
         ap.error("a name is required (or use --list)")
 
     prompt = " ".join(args.prompt)
@@ -124,7 +155,7 @@ def main():
     if not prompt:
         ap.error("a prompt is required (pass it as an argument or via stdin)")
 
-    run_prompt(args.name.strip(), prompt, args.as_json)
+    run_prompt(name, prompt, args.as_json)
 
 
 if __name__ == "__main__":
