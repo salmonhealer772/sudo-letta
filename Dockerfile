@@ -13,6 +13,7 @@ RUN apt-get update && \
     make \
     g++ \
     python3 \
+    python3-pip \
     ripgrep \
     openssh-client \
     && rm -rf /var/lib/apt/lists/*
@@ -49,8 +50,19 @@ RUN mkdir -p /home/node/.letta && \
 # Create /.letta so the process can write local project settings without EACCES
 RUN mkdir -p /.letta && chown -R node:node /.letta
 
+# Per-pod MCP server: a streamable-HTTP wrapper over letta-p's prompt logic.
+# letta_prompt.py is the single source of truth shared with kube-scripts/letta-p.py;
+# mcp_server.py runs inside the pod and prompts THIS agent directly (no kubectl).
+# mcp_entrypoint.sh starts the MCP server and keeps the pod alive (the CMD below).
+COPY kube-scripts/letta_prompt.py /opt/letta-mcp/letta_prompt.py
+COPY kube-scripts/mcp_server.py /opt/letta-mcp/mcp_server.py
+COPY kube-scripts/mcp_entrypoint.sh /opt/letta-mcp/mcp_entrypoint.sh
+RUN chmod +x /opt/letta-mcp/mcp_entrypoint.sh && \
+    pip3 install --no-cache-dir --break-system-packages fastmcp==4.0.9 && \
+    chown -R node:node /opt/letta-mcp
+
 USER node
 
 WORKDIR /home/node/.letta
 
-CMD ["sh", "-c", "tail -f /dev/null"]
+CMD ["sh", "/opt/letta-mcp/mcp_entrypoint.sh"]

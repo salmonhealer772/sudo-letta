@@ -30,6 +30,11 @@ Why the plumbing is the way it is (hard-won):
     "Provider is not configured: openai").
   - `--stream` switches to `--output-format stream-json` and prints assistant
     text deltas live, one token at a time.
+
+The letta CLI command construction, resume logic, settings.json conversationId
+parsing, stream-json delta parsing, and json-output parsing all live in the
+shared module `letta_prompt` (imported here), so this CLI and the per-pod MCP
+server (kube-scripts/mcp_server.py) share one source of truth.
 """
 
 import argparse
@@ -37,7 +42,8 @@ import json
 import subprocess
 import sys
 
-LETTA_JS = "/usr/local/lib/node_modules/@letta-ai/letta-code/letta.js"
+import letta_prompt
+
 KUBECTL = "kubectl"
 
 
@@ -115,14 +121,7 @@ def get_conversation_id(name):
     )
     if proc.returncode != 0:
         return None
-    try:
-        settings = json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        return None
-    try:
-        return settings["sessionsByServer"]["local:/home/node/.letta/lc-local-backend"]["conversationId"]
-    except (KeyError, TypeError):
-        return None
+    return letta_prompt.get_conversation_id_from_settings(proc.stdout)
 
 
 def _resume_arg(name, as_new_chat):
@@ -134,30 +133,14 @@ def _resume_arg(name, as_new_chat):
     if as_new_chat:
         return "--new "
     conv_id = get_conversation_id(name)
-    if conv_id:
-        return f"--conversation {conv_id} "
-    return ""
+    return letta_prompt.resume_fragment(conv_id, False)
 
 
 def _stream_reply(cmd, name):
     """Run the CLI in stream-json mode and print assistant text deltas live."""
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    for line in proc.stdout:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            evt = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        # Assistant text arrives as: {"type":"message", "message_type":
-        # "assistant_message", "content":[{"type":"text","text":"<delta>"}], ...}.
-        # The system/init, usage_statistics, stop_reason and final result events
-        # are ignored (the result text is already streamed via these deltas).
-        if evt.get("type") == "message" and evt.get("message_type") == "assistant_message":
-            content = evt.get("content")
-            if isinstance(content, list) and content and content[0].get("type") == "text":
-                print(content[0].get("text", ""), end="", flush=True)
+    for delta in letta_prompt.iter_assistant_deltas(proc.stdout):
+        print(delta, end="", flush=True)
     proc.wait()
     if proc.returncode != 0:
         stderr = proc.stderr.read().strip()
@@ -177,15 +160,14 @@ def run_prompt(name, prompt, as_json, as_stream=False, as_new_chat=False):
     cmd = [
         KUBECTL, "exec", f"deploy/{deploy}", "--",
         "sh", "-c",
-        # HOME=/home/node so letta reads the real provider config, not /root's
-        f"HOME=/home/node node {LETTA_JS} --backend local {resume}-p {json.dumps(prompt)}",
+        letta_prompt.build_letta_command(prompt, resume),
     ]
     if as_json:
         # NOTE: the --json branch overwrites cmd[4] (the "sh" token) instead of
         # cmd[6] — a known PRE-EXISTING bug that is intentionally left unfixed.
-        cmd[4] = f"HOME=/home/node node {LETTA_JS} --backend local --output-format json {resume}-p {json.dumps(prompt)}"
+        cmd[4] = letta_prompt.build_letta_command(prompt, resume, "json")
     elif as_stream:
-        cmd[6] = f"HOME=/home/node node {LETTA_JS} --backend local --output-format stream-json {resume}-p {json.dumps(prompt)}"
+        cmd[6] = letta_prompt.build_letta_command(prompt, resume, "stream-json")
 
     if as_stream:
         _stream_reply(cmd, name)

@@ -73,6 +73,29 @@ Letta Code has native, well-tested memory that actually works — agents rewrite
 - Native permissions system
 - Built-in hooks and scheduling
 
+## MCP Service (every pod)
+
+Every sudo-letta pod runs a per-pod **MCP (Model Context Protocol) server** that
+exposes the `letta-p.py` prompt surface over HTTP — a thin wrapper with the same
+flags and nothing more. It is fronted by a Kubernetes Service named
+`sudo-<name>-mcp`.
+
+- **Endpoint** (streamable HTTP, from inside the cluster):
+  `http://sudo-<name>-mcp:8000/mcp`
+- **Tool**: `letta_prompt`
+  - `prompt` (string, required) — the message to send
+  - `stream` (bool, default false) — maps to `--stream` (stream-json path)
+  - `json` (bool, default false) — maps to `--json` (`--output-format json`)
+  - `new_chat` (bool, default false) — maps to `--new-chat` (`--new`)
+- **Semantics**: a one-shot prompt to *that pod's own* agent. By default it
+  resumes the agent's persisted conversation; `new_chat` starts a fresh one.
+  The MCP server invokes the Letta CLI directly inside the pod (no kubectl).
+- **Port**: the Service exposes a stable port `8000`; internally each pod
+  listens on a unique per-agent port (auto-derived from the agent name) because
+  every sudo-letta pod runs `hostNetwork: true` and a fixed port would collide.
+- **Not exposed**: `--list` / cross-agent name resolution — that requires
+  `kubectl`/kubeconfig and remains host-side (`kube-scripts/letta-p.py --list`).
+
 ## Stack
 
 - [Letta Code](https://github.com/letta-ai/letta-code) by Letta AI — stateful agent harness with native memory

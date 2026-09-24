@@ -44,6 +44,32 @@ Letta Code has built-in persistent memory. Agents programmatically rewrite their
 - **Message search** — FTS5 across all conversations
 - **Skills** — agents create and load their own skills
 
+## MCP Service
+
+Each `sudo-{name}` pod runs an MCP server (streamable HTTP) that wraps the
+`letta-p` prompt surface. It is deployed by `up.sh` as part of the same generated
+YAML, and runs inside the pod (as `node`, `HOME=/home/node`), so it prompts that
+pod's own agent directly — no kubectl, no kubeconfig, no cross-agent routing.
+
+- **Service**: `sudo-{name}-mcp` (ClusterIP). Stable client-facing port `8000`,
+  targetPort a unique per-agent port (derived from the agent name) because every
+  sudo-letta pod runs `hostNetwork: true` and a fixed port would collide.
+- **URL**: `http://sudo-{name}-mcp:8000/mcp`
+- **Tool**: `letta_prompt(prompt, stream=false, json=false, new_chat=false)` —
+  a 1:1 mapping of letta-p.py's flags (prompt / `--stream` / `--json` /
+  `--new-chat`). Default resumes the persisted conversation; `new_chat` forces a
+  fresh one.
+- **Single source of truth**: `kube-scripts/letta_prompt.py` holds the letta
+  command construction, resume logic, settings.json conversationId parsing,
+  stream-json delta parsing, and json-output parsing. Both `letta-p.py` (host
+  CLI) and `mcp_server.py` (in-pod MCP) import it.
+- **Image**: `letta_prompt.py`, `mcp_server.py`, and `mcp_entrypoint.sh` are
+  copied into the image (plus `fastmcp` installed via pip); the container CMD is
+  the entrypoint, which starts the MCP server in the background and keeps the
+  pod alive with `tail -f /dev/null`.
+- **Limitation**: `--list` / cross-agent name resolution is host-side only (needs
+  `kubectl`/kubeconfig) and is intentionally not exposed by the per-pod MCP.
+
 ## Stack
 
 Letta Code by Letta AI (TypeScript, Apache license). Docker. Alpine/busybox for volume chown. Any OpenAI-compatible API.
