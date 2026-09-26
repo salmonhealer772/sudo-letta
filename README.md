@@ -147,3 +147,9 @@ Day-to-day commands for watching a sudo-letta agent (run from the host; get the 
 - **Gotcha**: shell variables like `$IP` do not survive between terminals — set and use them in the same command line, or re-derive the clusterIP each time.
 - **PRIVACY NOTE**: `events.jsonl` contains full prompts + reasoning + tool results. It lives on the agent PVC and the tap endpoints are in-cluster only. Treat the PVC as sensitive — anyone with cluster access can read an agent's entire stream of consciousness.
 - The sidecar is unprivileged (no docker socket, no privileged securityContext — /proc reads work fine in the shared PID namespace), writes ONLY under `/home/node/.letta/watch`, and runs as `node`, same uid as the rest of the PVC.
+
+## Web search
+
+Every agent ships the official `@letta-ai/web-search` mod (tool: `web_search`), pre-installed in the image so fresh agents are born with it. The tool auto-selects a provider from the EXA / TAVILY / PARALLEL / PERPLEXITY API keys the agent has configured — set one via the agent's secret store (`/secret set TAVILY_API_KEY ...`) or env, otherwise `web_search` cannot run.
+
+The Letta CLI is pinned to `0.33.2` in the Dockerfile: `0.33.0` silently broke `.ts`-entry mod loading, so the mod's tool never registered (zero diagnostics). Do not unpin without testing `web_search` on a recreated pod after any CLI upgrade.

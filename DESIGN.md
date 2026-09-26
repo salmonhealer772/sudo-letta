@@ -88,3 +88,10 @@ Each `sudo-{name}` pod also runs a second container `watch` (image `sudo-letta:l
 - **Config**: `ConfigMap sudo-{name}-watch-config` (mounted at /etc/watch-config/config.json) — {agent_name, deploy_name, watch_port, poll_interval_sec, log_dir}; env WATCH_PORT / AGENT_NAME / DEPLOY_NAME override it. Defaults: log_dir `/home/node/.letta/watch`, poll 2s, tool_result truncate 4096 bytes.
 - **Privilege model**: the sidecar is deliberately unprivileged (no docker socket, no privileged securityContext) — /proc reads across the shared PID namespace work fine as node.
 - **shareProcessNamespace caveat**: PID 1 in the pod is the pause container, NOT the agent; the main container CMD is unaffected.
+
+
+## Web search
+
+- The image pre-installs the official `npm:@letta-ai/web-search` mod (tool `web_search`) into `/home/node/.letta` at build time — fresh agents/PVCs get it automatically; existing agents' PVCs already carry it (the PVC mounts over image contents).
+- Provider auto-selects from EXA / TAVILY / PARALLEL / PERPLEXITY keys; an agent needs one configured (`/secret set TAVILY_API_KEY ...` or env) for the tool to work.
+- CLI pinned to `@letta-ai/letta-code@0.33.2` in the Dockerfile: 0.33.0 silently failed to load `.ts`-entry mods (no compiled `.letta-mod-index-*.mjs` cache, no diagnostics), so `web_search` never registered. 0.33.2 verified working live. Do not unpin without a post-upgrade web_search test on a recreated pod.

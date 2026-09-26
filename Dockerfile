@@ -38,14 +38,24 @@ RUN echo "node ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/node && \
 # numeric gid matters, and it must match the host's gid 109.)
 RUN groupadd --gid 109 dockerhost && usermod -aG dockerhost node
 
-# Install Letta Code globally (cache layer)
-RUN npm install -g @letta-ai/letta-code && \
+# Install Letta Code globally.
+# PINNED to 0.33.2 (exact pin, not ^/latest): letta-code 0.33.0 silently broke
+# loading of .ts-entry mods - the official web-search mod's tool never
+# registered, with zero diagnostics. 0.33.2 is verified working with
+# web_search (verified live 2026-09). Do NOT unpin without testing web_search
+# on a recreated pod after any CLI upgrade.
+RUN npm install -g @letta-ai/letta-code@0.33.2 && \
     npm cache clean --force
 
 # Pre-seed Letta config
 RUN mkdir -p /home/node/.letta && \
     echo '{"lastAgent":null,"tokenStreaming":false,"globalSharedBlockIds":{},"preferredBackendMode":"local"}' > /home/node/.letta/settings.json && \
     chown -R node:node /home/node
+
+# Pre-install the official web-search mod so every FRESH agent is born with it
+# (tool: web_search). Existing agents' PVCs already carry the mod and the PVC
+# mounts over image contents, so this matters for NEW agents/PVCs only.
+RUN su node -c 'HOME=/home/node letta install npm:@letta-ai/web-search'
 
 # Create /.letta so the process can write local project settings without EACCES
 RUN mkdir -p /.letta && chown -R node:node /.letta
