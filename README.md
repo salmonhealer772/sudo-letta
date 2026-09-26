@@ -101,3 +101,23 @@ flags and nothing more. It is fronted by a Kubernetes Service named
 - [Letta Code](https://github.com/letta-ai/letta-code) by Letta AI — stateful agent harness with native memory
 - Docker — each agent gets its own cage
 - Node.js 22+ — Letta Code runtime
+
+## Observer sidecar (every pod)
+
+Every sudo-letta pod ships a second container, `watch`, that runs the observer-sidecar daemon (`kube-scripts/watch_sidecar.py`) alongside the agent:
+
+- **Monitors** the agent container: is it up, what processes are running, and idle<->active transitions (a process is letta activity if its cmdline references letta). The pod runs `shareProcessNamespace: true`, so the sidecar sees the agent container's processes (PID 1 is the pause container; the agent CMD is unaffected).
+- **Captures** everything the agent does — every prompt in, every reply out, all reasoning, every tool call + result — into `events.jsonl` on the agent PVC (`/home/node/.letta/watch/events.jsonl`), tailed from the Letta message store with persisted byte-offset watermarks.
+- **Serves a live HTTP tap** so an operator can watch an agent's stream of consciousness in real time:
+  - `GET /healthz` — liveness
+  - `GET /status` — JSON: {agent, deploy, uptime_s, agent_container_up, active, current_conversation, last_event_ts, events_logged, watch_port}
+  - `GET /ps` — JSON list of {pid,ppid,uid,age_s,cmdline} for every non-self process
+  - `GET /events?n=100` — the last N event lines verbatim (JSONL)
+  - `GET /stream` — live chunked tail of new events as they're appended (flush per event, stops on client disconnect)
+- **Event schema** — one JSON object per line in `events.jsonl`, common `{"ts": <epoch>, "conversation": <decoded id>, "event": <type>}`; types: `user` {text}, `thinking` {text}, `assistant` {text}, `tool_call` {name,args}, `tool_result` {text,truncated,full_bytes}, `session` {id,cwd}, `process_state` {state,processes}.
+- **Service** — `sudo-<name>-watch` (ClusterIP, port 8000 name "watch" -> targetPort WATCH_PORT, a unique per-agent port derived from `<name>-watch` for the same hostNetwork reason as MCP_PORT).
+- **Tap it**:
+  `kubectl exec deploy/sudo-<name> -c watch -- tail -f /home/node/.letta/watch/events.jsonl`
+  and from the node: `curl http://$(kubectl get svc sudo-<name>-watch -o jsonpath='{.spec.clusterIP}'):8000/stream`
+- **PRIVACY NOTE**: `events.jsonl` contains full prompts + reasoning + tool results. It lives on the agent PVC and the tap endpoints are in-cluster only. Treat the PVC as sensitive — anyone with cluster access can read an agent's entire stream of consciousness.
+- The sidecar is unprivileged (no docker socket, no privileged securityContext — /proc reads work fine in the shared PID namespace), writes ONLY under `/home/node/.letta/watch`, and runs as `node`, same uid as the rest of the PVC.

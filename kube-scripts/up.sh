@@ -41,6 +41,15 @@ NODE_HOSTNAME="$(hostname)"
 # (targetPort) to this unique per-agent port.
 MCP_PORT=$(( 8000 + $(printf '%s' "$NAME" | cksum | cut -d' ' -f1) % 24768 ))
 
+# Per-agent WATCH (observer sidecar) port — same hostNetwork collision rules
+# as MCP_PORT, but hashed from a DIFFERENT string ("$NAME-watch") so it never
+# collides with the MCP port. Guard bumps by 1 in the (astronomically rare) case
+# the two hashes land on the same port.
+WATCH_PORT=$(( 8000 + $(printf '%s-watch' "$NAME" | cksum | cut -d' ' -f1) % 24768 ))
+if [[ "$WATCH_PORT" == "$MCP_PORT" ]]; then
+  WATCH_PORT=$(( MCP_PORT + 1 ))
+fi
+
 # If repo is root-owned and we're not root, bail early
 if [[ ! -w "$REPO_DIR" ]] && [[ "$(id -u)" != "0" ]]; then
   echo "Repo is root-owned. Run with: sudo bash kube-scripts/up.sh --$NAME" >&2
@@ -137,6 +146,7 @@ spec:
         app: sudo-letta
         agent: $NAME
     spec:
+      shareProcessNamespace: true
       hostNetwork: true
       hostAliases:
       - ip: "127.0.0.1"
@@ -155,6 +165,28 @@ $ENV_YAML
           mountPath: /home/node/.letta
         - name: docker-sock
           mountPath: /var/run/docker.sock
+      # ── Observer sidecar container ────────────────────────────────────────
+      # Monitors the agent container (shared PID namespace), captures every
+      # message from the Letta store into <PVC>/watch/events.jsonl, and serves
+      # the HTTP tap on WATCH_PORT. Same image; no docker socket; unprivileged.
+      - name: watch
+        image: sudo-letta:latest
+        imagePullPolicy: IfNotPresent
+        command: ["python3", "/opt/letta-watch/watch_sidecar.py"]
+        env:
+        - name: WATCH_PORT
+          value: "$WATCH_PORT"
+        - name: AGENT_NAME
+          value: "$NAME"
+        - name: DEPLOY_NAME
+          value: "$DEPLOY"
+        - name: HOME
+          value: "/home/node"
+        volumeMounts:
+        - name: data
+          mountPath: /home/node/.letta
+        - name: watch-config
+          mountPath: /etc/watch-config
       volumes:
       - name: data
         persistentVolumeClaim:
@@ -163,6 +195,28 @@ $ENV_YAML
         hostPath:
           path: /var/run/docker.sock
           type: Socket
+      - name: watch-config
+        configMap:
+          name: $DEPLOY-watch-config
+---
+# ── Observer sidecar (watch) ──────────────────────────────────────────────
+# ConfigMap consumed by the watch container at /etc/watch-config/config.json.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: $DEPLOY-watch-config
+  labels:
+    app: sudo-letta
+    agent: $NAME
+data:
+  config.json: |
+    {
+      "agent_name": "$NAME",
+      "deploy_name": "$DEPLOY",
+      "watch_port": $WATCH_PORT,
+      "poll_interval_sec": 2,
+      "log_dir": "/home/node/.letta/watch"
+    }
 ---
 apiVersion: v1
 kind: Service
@@ -180,6 +234,26 @@ spec:
   - name: mcp
     port: 8000
     targetPort: $MCP_PORT
+---
+# Observer sidecar Service: stable port 8000 -> per-agent WATCH_PORT
+# (hostNetwork pods share the node's network namespace, so the sidecar itself
+# listens on a unique per-agent port; the Service gives it a stable name).
+apiVersion: v1
+kind: Service
+metadata:
+  name: $DEPLOY-watch
+  labels:
+    app: sudo-letta
+    agent: $NAME
+spec:
+  type: ClusterIP
+  selector:
+    app: sudo-letta
+    agent: $NAME
+  ports:
+  - name: watch
+    port: 8000
+    targetPort: $WATCH_PORT
 YAMLEOF
 
 if [[ ! -s "$YAML" ]]; then
@@ -251,5 +325,6 @@ fi
 echo "  Talk:   kubectl exec -it deploy/$DEPLOY -- bash -c 'letta'"
 echo "  Shell:  kubectl exec -it deploy/$DEPLOY -- bash"
 echo "  MCP:    http://$DEPLOY-mcp:8000/mcp"
+echo "  Watch:  http://$DEPLOY-watch:8000/status  (also /ps /events /stream /healthz)"
 echo "  Logs:   kubectl logs deploy/$DEPLOY -f"
 echo "  Stop:   bash kube-scripts/down.sh --$NAME"

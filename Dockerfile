@@ -57,6 +57,10 @@ RUN mkdir -p /.letta && chown -R node:node /.letta
 COPY kube-scripts/letta_prompt.py /opt/letta-mcp/letta_prompt.py
 COPY kube-scripts/mcp_server.py /opt/letta-mcp/mcp_server.py
 COPY kube-scripts/mcp_entrypoint.sh /opt/letta-mcp/mcp_entrypoint.sh
+# Observer sidecar daemon: monitors the agent container's processes, captures
+# every prompt/reply/thinking/tool event from the Letta message store into a
+# durable JSONL log on the agent PVC, and serves a live HTTP tap.
+COPY kube-scripts/watch_sidecar.py /opt/letta-watch/watch_sidecar.py
 RUN chmod +x /opt/letta-mcp/mcp_entrypoint.sh && \
     pip3 install --no-cache-dir --break-system-packages fastmcp==4.0.9 && \
     chown -R node:node /opt/letta-mcp

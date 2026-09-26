@@ -1,3 +1,6 @@
 # API keys, sudo passwords — never commit
 .sudo-letta/
 deployments/
+
+# python bytecode
+__pycache__/

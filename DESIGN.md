@@ -73,3 +73,17 @@ pod's own agent directly — no kubectl, no kubeconfig, no cross-agent routing.
 ## Stack
 
 Letta Code by Letta AI (TypeScript, Apache license). Docker. Alpine/busybox for volume chown. Any OpenAI-compatible API.
+
+## Observer sidecar
+
+Each `sudo-{name}` pod also runs a second container `watch` (image `sudo-letta:latest` — same image; `kube-scripts/watch_sidecar.py` baked in at `/opt/letta-watch/`). It has three jobs:
+
+1. **Process monitor** — polls `/proc` every `poll_interval_sec` (default 2s). Because the pod spec sets `shareProcessNamespace: true`, the sidecar sees the agent container's processes (PID 1 is the pause container; excluded, along with the sidecar's own pid tree). A process counts as letta activity when its cmdline references letta; idle<->active transitions append a `process_state` event. `agent_container_up` = any other non-self, non-pause process visible.
+2. **Capture** — tail-follows every `/home/node/.letta/lc-local-backend/conversations/*/messages.jsonl` with byte-offset watermarks persisted in `<log_dir>/state.json`. A shrunk file (recreate/rotation) resets its watermark; only complete lines are parsed (a partial trailing line is buffered). Records are normalized into the event schema and appended to `<log_dir>/events.jsonl`.
+3. **HTTP tap** — stdlib http.server on `WATCH_PORT` (unique per agent, same hostNetwork collision logic as MCP_PORT; Service `sudo-{name}-watch` exposes stable port 8000). Endpoints: `/healthz`, `/status`, `/ps`, `/events?n=N`, `/stream` (live chunked tail).
+
+- **Event schema** — `events.jsonl` lines: common {ts, conversation, event}; types `user`{text}, `thinking`{text}, `assistant`{text}, `tool_call`{name,args}, `tool_result`{text, truncated, full_bytes}, `session`{id,cwd}, `process_state`{state,processes}. `<system-reminder>` text blocks are kept verbatim and tagged `reminder:true`.
+- **Privacy**: events.jsonl holds full prompts + reasoning + tool results. It lives on the agent PVC; the tap is in-cluster only (ClusterIP). Treat the PVC as sensitive.
+- **Config**: `ConfigMap sudo-{name}-watch-config` (mounted at /etc/watch-config/config.json) — {agent_name, deploy_name, watch_port, poll_interval_sec, log_dir}; env WATCH_PORT / AGENT_NAME / DEPLOY_NAME override it. Defaults: log_dir `/home/node/.letta/watch`, poll 2s, tool_result truncate 4096 bytes.
+- **Privilege model**: the sidecar is deliberately unprivileged (no docker socket, no privileged securityContext) — /proc reads across the shared PID namespace work fine as node.
+- **shareProcessNamespace caveat**: PID 1 in the pod is the pause container, NOT the agent; the main container CMD is unaffected.
