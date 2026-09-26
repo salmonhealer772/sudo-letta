@@ -320,6 +320,53 @@ SETTINGS
     fi
   ' 2>/dev/null || true
 
+  # Agent-record hygiene: strip GHOST agent records (memfs:false, unpinned
+  # duplicates left by historical CLI runs). When a session binds to a ghost,
+  # the official web-search mod's tools never attach -> agent reports no
+  # web_search. Runs on EVERY up.sh (create + recreate). Never bricks the
+  # agent: parse failure leaves settings.json untouched; sessionsByServer
+  # and all other keys are preserved verbatim; backup written to .bak-ghosts.
+  kubectl exec "$POD" -- bash -c 'python3 - << "PYEOF"
+import json, shutil, os, sys
+
+path = "/home/node/.letta/settings.json"
+
+try:
+    with open(path) as f:
+        data = json.load(f)
+except Exception as exc:
+    print("ghost-hygiene: parse failed, settings.json left untouched (%s)" % exc)
+    sys.exit(0)
+
+agents = data.get("agents") or []
+if not agents:
+    sys.exit(0)
+
+def is_pinned(rec):
+    return isinstance(rec, dict) and (rec.get("memfs") is True or rec.get("pinned") is True)
+
+keep = [a for a in agents if is_pinned(a)]
+removed = len(agents) - len(keep)
+
+if removed and not keep:
+    print("ghost-hygiene: WARNING no pinned (memfs) record found — leaving settings.json untouched")
+    sys.exit(0)
+
+if removed:
+    shutil.copy2(path, path + ".bak-ghosts")
+    data["agents"] = keep
+    last = data.get("lastAgent")
+    last_id = last if isinstance(last, str) else (last.get("id") if isinstance(last, dict) else None)
+    keep_ids = {a.get("id") for a in keep}
+    if last_id is not None and last_id not in keep_ids and keep[0].get("id") is not None:
+        data["lastAgent"] = keep[0]["id"]
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, path)
+    print("ghost-hygiene: removed %d ghost agent record(s), kept %d pinned" % (removed, len(keep)))
+PYEOF' || true
+
   echo "→ Letta configured"
 fi
 echo "  Talk:   kubectl exec -it deploy/$DEPLOY -- bash -c 'letta'"

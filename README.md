@@ -153,3 +153,14 @@ Day-to-day commands for watching a sudo-letta agent (run from the host; get the 
 Every agent ships the official `@letta-ai/web-search` mod (tool: `web_search`), pre-installed in the image so fresh agents are born with it. The tool auto-selects a provider from the EXA / TAVILY / PARALLEL / PERPLEXITY API keys the agent has configured — set one via the agent's secret store (`/secret set TAVILY_API_KEY ...`) or env, otherwise `web_search` cannot run.
 
 The Letta CLI is pinned to `0.33.2` in the Dockerfile: `0.33.0` silently broke `.ts`-entry mod loading, so the mod's tool never registered (zero diagnostics). Do not unpin without testing `web_search` on a recreated pod after any CLI upgrade.
+
+The last failure mode is GHOST agent records: `settings.json`'s `agents[]` list
+accumulates unpinned, `memfs:false` duplicates left by historical CLI runs
+(one pod had 31 next to its single pinned record). When a session binds to a
+ghost record, the mod's tools never attach — the agent reports its tools array
+empty and no `web_search`, even though the mod is installed. `up.sh` now
+auto-normalizes on every deploy: ghost records are removed (the pinned
+`memfs:true` record and `sessionsByServer` are kept, a backup goes to
+`settings.json.bak-ghosts`). For pods you don't want to redeploy, run
+`bash kube-scripts/fix-agent-records.sh --<name>` (grep-style name resolution)
+to do the same cleanup on demand.
