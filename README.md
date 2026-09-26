@@ -113,11 +113,36 @@ Every sudo-letta pod ships a second container, `watch`, that runs the observer-s
   - `GET /status` — JSON: {agent, deploy, uptime_s, agent_container_up, active, current_conversation, last_event_ts, events_logged, watch_port}
   - `GET /ps` — JSON list of {pid,ppid,uid,age_s,cmdline} for every non-self process
   - `GET /events?n=100` — the last N event lines verbatim (JSONL)
-  - `GET /stream` — live chunked tail of new events as they're appended (flush per event, stops on client disconnect)
+  - `GET /stream` — live tail of new events as they're appended (`Connection: close`, one write+flush per event, stops when the client disconnects — not chunked transfer-encoding)
 - **Event schema** — one JSON object per line in `events.jsonl`, common `{"ts": <epoch>, "conversation": <decoded id>, "event": <type>}`; types: `user` {text}, `thinking` {text}, `assistant` {text}, `tool_call` {name,args}, `tool_result` {text,truncated,full_bytes}, `session` {id,cwd}, `process_state` {state,processes}.
 - **Service** — `sudo-<name>-watch` (ClusterIP, port 8000 name "watch" -> targetPort WATCH_PORT, a unique per-agent port derived from `<name>-watch` for the same hostNetwork reason as MCP_PORT).
 - **Tap it**:
   `kubectl exec deploy/sudo-<name> -c watch -- tail -f /home/node/.letta/watch/events.jsonl`
   and from the node: `curl http://$(kubectl get svc sudo-<name>-watch -o jsonpath='{.spec.clusterIP}'):8000/stream`
+- **Easiest tap — `stream.sh`** (from the host, one command):
+  `bash kube-scripts/stream.sh --<name>`
+  It finds the agent, picks /stream, and pretty-prints events live. Example output:
+  ```
+  $ bash kube-scripts/stream.sh --ya-glm-l
+  [sudo-ya-glm-l] tapping http://10.43.145.217:8000/stream
+  12:04:11 thinking  let me check the watch service...
+  12:04:14 tool_call  bash {"cmd": "kubectl get svc"}
+  12:04:15 tool_result  NAME ... TYPE ... ClusterIP ...
+  12:04:18 assistant  The watch service is up on port 8000.
+  ```
+
+### Operator cheat sheet
+
+Day-to-day commands for watching a sudo-letta agent (run from the host; get the clusterIP first):
+
+- **Daily driver**: `bash kube-scripts/stream.sh --<name>` — live pretty-printed event tap via `/stream`.
+- **Fallback (raw JSONL)**: `kubectl exec deploy/sudo-<name> -c watch -- tail -f /home/node/.letta/watch/events.jsonl`
+- **Port-forward variant**: `kubectl port-forward svc/sudo-<name>-watch 8000:8000` then `curl -N http://localhost:8000/stream` (the `-N` disables buffering so events appear live).
+- **One-shot status/ps/events** (clusterIP first: `kubectl get svc sudo-<name>-watch -o jsonpath='{.spec.clusterIP}'`):
+  - `curl http://$IP:8000/status` — agent up? active? events logged?
+  - `curl http://$IP:8000/ps` — process list of the agent container
+  - `curl http://$IP:8000/events?n=50` — last 50 events verbatim (JSONL)
+- **Filter raw events by type**: `curl -N http://$IP:8000/stream | grep '"event": "thinking"'` (also try `"assistant"`, `"tool_call"`, `"tool_result"`).
+- **Gotcha**: shell variables like `$IP` do not survive between terminals — set and use them in the same command line, or re-derive the clusterIP each time.
 - **PRIVACY NOTE**: `events.jsonl` contains full prompts + reasoning + tool results. It lives on the agent PVC and the tap endpoints are in-cluster only. Treat the PVC as sensitive — anyone with cluster access can read an agent's entire stream of consciousness.
 - The sidecar is unprivileged (no docker socket, no privileged securityContext — /proc reads work fine in the shared PID namespace), writes ONLY under `/home/node/.letta/watch`, and runs as `node`, same uid as the rest of the PVC.

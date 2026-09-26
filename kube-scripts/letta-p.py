@@ -163,9 +163,9 @@ def run_prompt(name, prompt, as_json, as_stream=False, as_new_chat=False):
         letta_prompt.build_letta_command(prompt, resume),
     ]
     if as_json:
-        # NOTE: the --json branch overwrites cmd[4] (the "sh" token) instead of
-        # cmd[6] — a known PRE-EXISTING bug that is intentionally left unfixed.
-        cmd[4] = letta_prompt.build_letta_command(prompt, resume, "json")
+        # FIX: was cmd[4] (overwrote the "sh" token) — the command string lives
+        # at cmd[6], same as the stream branch. (P1 fix from the repo backlog.)
+        cmd[6] = letta_prompt.build_letta_command(prompt, resume, "json")
     elif as_stream:
         cmd[6] = letta_prompt.build_letta_command(prompt, resume, "stream-json")
 
