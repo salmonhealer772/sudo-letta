@@ -19,7 +19,8 @@ Three jobs in one process (threads):
        GET /status       -> JSON snapshot
        GET /ps           -> JSON list of non-self processes
        GET /events?n=100 -> last N event lines verbatim (JSONL)
-       GET /stream       -> live chunked tail of NEW events (flush per event)
+       GET /stream       -> backlog dump + live tail of NEW events (plain unframed
+                          stream, Connection: close; client disconnect closes the socket)
 
 Event schema — one JSON object per line in ``<log_dir>/events.jsonl``:
 
@@ -38,7 +39,9 @@ import json
 import os
 import threading
 import time
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import socket
 
 # ── Config ────────────────────────────────────────────────────────────────
 
@@ -427,23 +430,56 @@ class TapHandler(BaseHTTPRequestHandler):
         else:
             self._send(404, "not found\n")
 
-    def stream(self):
-        self.send_response(200)
-        self.send_header("Content-Type", "application/x-ndjson")
-        self.send_header("Transfer-Encoding", "chunked")
-        self.end_headers()
+    def stream(self, backlog=20):
+        """Live tail of events.jsonl: dump the last ``backlog`` events (so the
+        operator sees the recent session immediately), then follow NEW events.
+
+        Round-2 fixes (operator-reported bugs):
+        - NO chunked transfer encoding: we previously declared ``chunked`` but
+          wrote raw unframed bytes, so ``curl -N`` died mid-event with
+          "curl: (56) Malformed encoding". Now we write plain unframed bytes
+          with ``Connection: close`` — curl -N renders incrementally and the
+          connection simply ends when we finish/die.
+        - Client-disconnect detection: every write+flush failure
+          (BrokenPipeError / ConnectionResetError / any OSError on the socket)
+          means the client is gone (e.g. Ctrl-C on curl); we catch it and close
+          the socket immediately so no handler thread spins forever and no
+          error spam piles up.
+        """
+        self.close_connection = True  # one request per connection; no keepalive
         try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson")
+            self.send_header("Connection", "close")
+            self.end_headers()
             with open(events_path()) as f:
-                f.seek(0, 2)  # only NEW events
+                if backlog:
+                    # on-connect backlog dump of the most recent events
+                    for line in deque(f, maxlen=backlog):
+                        self.wfile.write(line.encode("utf-8", "replace"))
+                    self.wfile.flush()
+                f.seek(0, 2)  # live-follow: only NEW events from here
                 while True:
                     line = f.readline()
                     if line:
-                        self.wfile.write(b"%x\r\n%s\r\n" % (len(line), line.encode()))
+                        self.wfile.write(line.encode("utf-8", "replace"))
                         self.wfile.flush()
                     else:
                         time.sleep(0.5)
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            pass
+        except (BrokenPipeError, ConnectionResetError,
+                ConnectionAbortedError, OSError):
+            pass  # client went away; fall through to cleanup
+        finally:
+            # close the socket no matter how we got out, so the server thread
+            # and the kernel connection are reclaimed immediately
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                self.connection.close()
+            except OSError:
+                pass
 
 
 def http_server():
