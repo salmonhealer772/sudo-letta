@@ -6,6 +6,9 @@
 #   bash kube-scripts/stream.sh --<name>        # last 20 events, then live-follow
 #   bash kube-scripts/stream.sh <name>          # same, bare spelling
 #   bash kube-scripts/stream.sh --list          # list running sudo-letta agents
+#   bash kube-scripts/stream.sh --<name> -t      # transcript mode: last 40 lines of
+#                                               #   transcript.txt (plain-text chat log),
+#                                               #   then live-follow it. No pretty-printer.
 #
 # Ctrl-C returns to the prompt INSTANTLY (the kubectl tail is killed in the
 # trap; no hanging children). NO HTTP, NO port-forward — this reads the
@@ -135,9 +138,11 @@ PYEOF
 
 # ── argument handling (accept both --NAME and bare NAME) ────────────────────
 NAME=""
+TRANSCRIPT=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --list)  list_agents; exit 0 ;;
+    -t|--transcript) TRANSCRIPT=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --*)     NAME="${1#-}"; NAME="${NAME#-}"; shift ;;
     *)       NAME="$1"; shift ;;
@@ -161,6 +166,13 @@ DEPLOY="sudo-${BARE}"
 # children of this script; on Ctrl-C the INT trap kills them (kubectl's
 # remote `tail -f` dies with the exec session; the filter dies with its FIFO
 # writer gone) — prompt returns INSTANTLY, no hanging children.
+# transcript mode: plain-text chat log (real prompts + agent replies only),
+# already human-readable — no pretty-printer, just tail -f.
+if [ "$TRANSCRIPT" -eq 1 ]; then
+  exec kubectl exec "deploy/${DEPLOY}" -c watch -- \
+    tail -f -n 40 /home/node/.letta/watch/transcript.txt
+fi
+
 FIFO="$(mktemp -u /tmp/stream-fifo.XXXXXX)"
 mkfifo "$FIFO"
 kubectl exec "deploy/${DEPLOY}" -c watch -- \

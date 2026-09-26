@@ -13,6 +13,11 @@ Three jobs in one process (threads):
    message into events appended to ``<log_dir>/events.jsonl``.
    A file that shrinks (recreate/rotation) resets its watermark. Only complete
    lines are parsed (partial trailing line is buffered).
+   ALSO maintains ``<log_dir>/transcript.txt`` — a human-readable plain-text
+   chat log of ONLY real user prompts (reminder:false) and assistant replies
+   (thinking/tool/session/reminder events excluded). Blank line between
+   exchanges; a ``--- conversation: <id> ---`` divider when the conversation
+   changes. Appends only. Backfill: none — starts from deployment time.
 3. HTTP TAP — stdlib http.server (threaded) on WATCH_PORT (default 8000):
 
        GET /healthz     -> 200 OK
@@ -68,6 +73,7 @@ STATE = {
     "agent_container_up": False,
     "active": False,
     "last_process_state": None,  # "active" | "idle"
+    "last_transcript_conv": None,  # conversation of the last transcript line
 }
 _LOCK = threading.Lock()  # guards events.jsonl appends + STATE counters
 
@@ -98,6 +104,10 @@ def events_path():
     return os.path.join(CONFIG["log_dir"], "events.jsonl")
 
 
+def transcript_path():
+    return os.path.join(CONFIG["log_dir"], "transcript.txt")
+
+
 def state_path():
     return os.path.join(CONFIG["log_dir"], "state.json")
 
@@ -118,6 +128,40 @@ def append_event(event):
             f.write(line + "\n")
         STATE["events_logged"] += 1
         STATE["last_event_ts"] = event.get("ts")
+
+
+def append_transcript(event):
+    """Append one human-readable line to transcript.txt (chat log).
+
+    Only REAL user prompts (reminder:false) and assistant replies are
+    logged; thinking / tool_call / tool_result / session / process_state
+    and system-reminder user events are excluded (harness plumbing).
+    Appends only — tail -f friendly, never rewrites.
+    """
+    etype = event.get("event")
+    if etype == "user":
+        if event.get("reminder"):
+            return
+        who = "You:"
+    elif etype == "assistant":
+        who = "Agent:"
+    else:
+        return
+    text = event.get("text") or ""
+    conv = event.get("conversation") or ""
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(event.get("ts")))
+    with _LOCK:
+        ensure_log_dir()
+        parts = []
+        if conv and conv != STATE["last_transcript_conv"]:
+            parts.append("--- conversation: %s ---\n" % conv)
+        parts.append("[%s] %s %s\n\n" % (stamp, who, text))
+        try:
+            with open(transcript_path(), "a") as f:
+                f.write("".join(parts))
+            STATE["last_transcript_conv"] = conv or STATE["last_transcript_conv"]
+        except OSError:
+            pass  # best-effort; events.jsonl is the source of truth
 
 
 # ── Message-store capture ─────────────────────────────────────────────────
@@ -257,6 +301,7 @@ def capture_once(watermarks):
                 continue
             for ev in normalize_record(rec, conv):
                 append_event(ev)
+                append_transcript(ev)
         changed[path] = new_off
     return changed
 
@@ -371,6 +416,13 @@ def monitor_loop():
         time.sleep(interval)
 
 
+def _file_size(path):
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
 # ── HTTP tap ──────────────────────────────────────────────────────────────
 
 class TapHandler(BaseHTTPRequestHandler):
@@ -405,6 +457,7 @@ class TapHandler(BaseHTTPRequestHandler):
                 "current_conversation": STATE["current_conversation"],
                 "last_event_ts": STATE["last_event_ts"],
                 "events_logged": STATE["events_logged"],
+                "transcript_bytes": _file_size(transcript_path()),
                 "watch_port": CONFIG["watch_port"],
             })
         elif path == "/ps":
