@@ -25,4 +25,18 @@ if [[ -z "${KUBECONFIG:-}" ]]; then
   done
 fi
 
-kubectl exec -it "deploy/sudo-$NAME" -- bash -c 'letta'
+# NOTE: --new starts a FRESH conversation on every launch (agent identity and
+# memory are unaffected - identity lives in MemFS, not in the conversation).
+# Why not bare `letta` (auto-resume)? letta-code <=0.33.2 has a mod-loading
+# bug (letta-ai/letta-code #3499 / PR #4697, unmerged as of 2026-09-27): the
+# resume-path startup loads the global mods dir through TWO mod engines in
+# one process; the second registration trips the "already registered by
+# <same file>" shadowing check, aborting mods mid-activation. Result: a random
+# ~2 of 4 official mods fail to attach (often web_search) and the agent
+# truthfully reports the tool missing. `--new` takes the create-path, which
+# only spins up one mod engine -> all 4 mods load cleanly (verified: 10+
+# launches across ya-glm-l and clean-search-test, incl. 4 concurrent).
+# To continue an older chat, use /resume INSIDE the session (verified safe:
+# the clean 4/4 registry is kept). Revisit this flag when a letta-code
+# release containing PR #4697 ships.
+kubectl exec -it "deploy/sudo-$NAME" -- bash -c 'letta --new'
