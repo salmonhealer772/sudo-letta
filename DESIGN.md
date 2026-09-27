@@ -96,3 +96,12 @@ Each `sudo-{name}` pod also runs a second container `watch` (image `sudo-letta:l
 - Provider auto-selects from EXA / TAVILY / PARALLEL / PERPLEXITY keys; an agent needs one configured (`/secret set TAVILY_API_KEY ...` or env) for the tool to work.
 - CLI pinned to `@letta-ai/letta-code@0.33.2` in the Dockerfile: 0.33.0 silently failed to load `.ts`-entry mods (no compiled `.letta-mod-index-*.mjs` cache, no diagnostics), so `web_search` never registered. 0.33.2 verified working live. Do not unpin without a post-upgrade web_search test on a recreated pod.
 - Ghost agent records (memfs:false duplicates in settings.json agents[]) silently break tool attachment — sessions bound to a ghost never get the mod's tools. up.sh strips ghosts on every deploy (keeps the pinned memfs record + sessionsByServer, backs up to .bak-ghosts); fix-agent-records.sh does the same on demand for pods not being redeployed.
+
+## Verification-order rule (operator directive)
+
+Never write "verified" in a commit message before the verification output exists.
+Commit 29acf29's message claimed "Verified on a clean-room agent (blind natural-language
+prompt -> real web_search call)" — that verification actually ran AFTER the commit landed.
+The results were valid but the claim's ordering was false. Rule: verification first,
+paste the output, then commit. Verification performed only after committing must be
+described in a follow-up commit, not in the original message.
