@@ -128,6 +128,19 @@ EOF
   echo "✓ Created $SETTINGS_FILE"
 fi
 
+# --- Shared Redis for the prompt distributor queue ---
+# Applied now if kubectl + a cluster are available; otherwise applied on first up.sh deploy.
+if command -v kubectl >/dev/null 2>&1 && kubectl cluster-info >/dev/null 2>&1; then
+  echo "→ Applying shared Redis (kube-scripts/redis.yaml)..."
+  if ! kubectl apply -f "$SCRIPT_DIR/kube-scripts/redis.yaml" --validate=false; then
+    echo "✗ FAILED to apply kube-scripts/redis.yaml (shared Redis for the prompt distributor queue). Setup aborted — fix Redis provisioning and re-run setup.sh." >&2
+    exit 1
+  fi
+  echo "✓ Shared Redis applied"
+else
+  echo "⚠ kubectl/cluster not available yet — shared Redis (kube-scripts/redis.yaml) will be applied on the first up.sh agent deploy."
+fi
+
 echo ""
 echo "✓ Setup complete"
 echo ""

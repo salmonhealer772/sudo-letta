@@ -308,8 +308,12 @@ _import_image() {
   fi
 }
 
-# Shared Redis for the prompt distributor queue (safe to re-apply)
-kubectl apply -f "${SCRIPT_DIR}/redis.yaml" --validate=false >/dev/null 2>&1 || true
+# Shared Redis for the prompt distributor queue (idempotent kubectl apply; LOUD on failure)
+if ! kubectl apply -f "${SCRIPT_DIR}/redis.yaml" --validate=false; then
+  echo "✗ FAILED to apply ${SCRIPT_DIR}/redis.yaml (shared Redis for the prompt distributor queue). Fix Redis provisioning before deploying agents. Deploy aborted." >&2
+  exit 1
+fi
+echo "→ Shared Redis (redis.yaml) applied"
 echo "→ Importing images..."
 _import_image sudo-letta:latest
 
