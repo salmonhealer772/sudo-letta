@@ -152,6 +152,26 @@ Day-to-day commands for watching a sudo-letta agent (run from the host; get the 
 
 Every agent ships the official `@letta-ai/web-search` mod (tool: `web_search`), pre-installed in the image so fresh agents are born with it. The tool auto-selects a provider from the EXA / TAVILY / PARALLEL / PERPLEXITY API keys the agent has configured — set one via the agent's secret store (`/secret set TAVILY_API_KEY ...`) or env, otherwise `web_search` cannot run.
 
+Optional fleet-wide provider keys may be set as env vars in `.sudo-letta/.env`
+(gitignored — never commit keys):
+
+```
+#EXA_API_KEY=...
+#TAVILY_API_KEY=...
+#PARALLEL_API_KEY=...
+#PERPLEXITY_API_KEY=...
+```
+
+Uncomment and fill in any you want; `up.sh` injects only the ones that are set
+and non-empty into the generated deployment (no empty env vars). Agents that
+already have an agent-scoped secret (`/secret set TAVILY_API_KEY ...`) take
+precedence over the env fallback, per the mod's provider order
+(EXA > TAVILY > PARALLEL > PERPLEXITY).
+
+Mod install is via `letta install` in the image; no declarative install
+manifest exists as of letta-code 0.33.2. The mod itself is pinned to an exact
+version (`npm:@letta-ai/web-search@0.1.0`) in the Dockerfile.
+
 The Letta CLI is pinned to `0.33.2` in the Dockerfile: `0.33.0` silently broke `.ts`-entry mod loading, so the mod's tool never registered (zero diagnostics). Do not unpin without testing `web_search` on a recreated pod after any CLI upgrade.
 
 The last failure mode is GHOST agent records: `settings.json`'s `agents[]` list

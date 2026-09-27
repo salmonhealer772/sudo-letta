@@ -55,7 +55,10 @@ RUN mkdir -p /home/node/.letta && \
 # Pre-install the official web-search mod so every FRESH agent is born with it
 # (tool: web_search). Existing agents' PVCs already carry the mod and the PVC
 # mounts over image contents, so this matters for NEW agents/PVCs only.
-RUN su node -c 'HOME=/home/node letta install npm:@letta-ai/web-search'
+# MOD PIN: the mod is installed at an EXACT version (@0.1.0), never
+# latest/^, so a breaking upstream release cannot silently kill
+# web_search across the fleet. Bump deliberately and re-test live.
+RUN su node -c 'HOME=/home/node letta install npm:@letta-ai/web-search@0.1.0'
 
 # Create /.letta so the process can write local project settings without EACCES
 RUN mkdir -p /.letta && chown -R node:node /.letta

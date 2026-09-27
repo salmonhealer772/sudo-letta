@@ -77,6 +77,14 @@ if [[ -f "$ENV_FILE" ]] && [[ -r "$ENV_FILE" ]]; then
   LLM_PROVIDER=$(grep '^LLM_PROVIDER=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- | head -1 || true)
   API_KEY=$(grep '^API_KEY=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- | head -1 || true)
   LLM_BASE_URL=$(grep '^LLM_BASE_URL=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- | head -1 || true)
+  # Optional web_search provider keys (read but never echoed/committed).
+  # Any that are set AND non-empty are injected into the pod env below;
+  # unset ones are skipped entirely (no empty-value env vars).
+  for _opt in EXA_API_KEY TAVILY_API_KEY PARALLEL_API_KEY PERPLEXITY_API_KEY; do
+    _val=$(grep "^${_opt}=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- | head -1 || true)
+    [[ -n "${_val}" ]] && eval "${_opt}="\${_val}"" || true
+  done
+  unset _opt _val
 fi
 
 # Prompt for credentials if missing
@@ -101,6 +109,18 @@ ENV_YAML="        - name: LLM_PROVIDER
 [[ -n "${LLM_BASE_URL:-}" ]] && ENV_YAML+="
         - name: LLM_BASE_URL
           value: \"${LLM_BASE_URL}\""
+# Optional web_search provider keys: inject only the ones that are set and
+# non-empty (fleet-wide fallback; agent-scoped /secret takes precedence per
+# the mod). Never echo the values.
+for _opt in EXA_API_KEY TAVILY_API_KEY PARALLEL_API_KEY PERPLEXITY_API_KEY; do
+  _val="${!_opt:-}"
+  if [[ -n "$_val" ]]; then
+    ENV_YAML+="
+        - name: ${_opt}
+          value: \"${_val}\""
+  fi
+done
+unset _opt _val
 
 ENV_YAML+="
         - name: USER
