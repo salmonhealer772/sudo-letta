@@ -387,6 +387,16 @@ if removed:
     print("ghost-hygiene: removed %d ghost agent record(s), kept %d pinned" % (removed, len(keep)))
 PYEOF' || true
 
+  # Official web-search mod: install idempotently on EVERY deploy. The image
+  # pre-installs it, but a fresh PVC shadows /home/node/.letta — brand-new
+  # agents deploy WITHOUT the mod unless we install it here. Pinned exact
+  # version; `letta install` is already idempotent (verified). Skipping when
+  # present keeps redeploys fast.
+  kubectl exec "$POD" -- bash -c '
+    HOME=/home/node node /usr/local/lib/node_modules/@letta-ai/letta-code/letta.js mods list 2>/dev/null | grep -q "web-search" \
+      || HOME=/home/node node /usr/local/lib/node_modules/@letta-ai/letta-code/letta.js install npm:@letta-ai/web-search@0.1.0
+  ' 2>/dev/null || echo "⚠ web-search mod install failed (agent will lack web_search)"
+
   echo "→ Letta configured"
 fi
 echo "  Talk:   kubectl exec -it deploy/$DEPLOY -- bash -c 'letta'"
