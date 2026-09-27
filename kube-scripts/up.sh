@@ -85,6 +85,21 @@ if [[ -f "$ENV_FILE" ]] && [[ -r "$ENV_FILE" ]]; then
     [[ -n "${_val}" ]] && eval "${_opt}="\${_val}"" || true
   done
   unset _opt _val
+  # Web-search provider key gate: a deployed agent MUST have at least one of
+  # the search provider keys (fleet env above or agent-scoped /secret). If we
+  # are injecting none at all, fail the deploy LOUDLY — the web-search mod
+  # would install but every web_search call would fail at runtime.
+  _have_key=0
+  for _opt in EXA_API_KEY TAVILY_API_KEY PARALLEL_API_KEY PERPLEXITY_API_KEY; do
+    [[ -n "${!_opt:-}" ]] && _have_key=1
+  done
+  unset _opt
+  if [[ "$_have_key" -ne 1 ]]; then
+    echo "✗ FATAL: no web-search provider key found in $ENV_FILE." >&2
+    echo "  Add at least one of: EXA_API_KEY, TAVILY_API_KEY, PARALLEL_API_KEY, PERPLEXITY_API_KEY" >&2
+    echo "  (the web-search mod cannot search without one; refusing to deploy a blind agent)" >&2
+    exit 1
+  fi
 fi
 
 # Prompt for credentials if missing
@@ -387,15 +402,45 @@ if removed:
     print("ghost-hygiene: removed %d ghost agent record(s), kept %d pinned" % (removed, len(keep)))
 PYEOF' || true
 
-  # Official web-search mod: install idempotently on EVERY deploy. The image
-  # pre-installs it, but a fresh PVC shadows /home/node/.letta — brand-new
-  # agents deploy WITHOUT the mod unless we install it here. Pinned exact
-  # version; `letta install` is already idempotent (verified). Skipping when
-  # present keeps redeploys fast.
-  kubectl exec "$POD" -- bash -c '
-    HOME=/home/node node /usr/local/lib/node_modules/@letta-ai/letta-code/letta.js mods list 2>/dev/null | grep -q "web-search" \
-      || HOME=/home/node node /usr/local/lib/node_modules/@letta-ai/letta-code/letta.js install npm:@letta-ai/web-search@0.1.0
-  ' 2>/dev/null || echo "⚠ web-search mod install failed (agent will lack web_search)"
+  # Official mod set: install EVERY standard mod, pinned to EXACT versions,
+  # idempotently, on EVERY deploy. The image pre-installs web-search, but a
+  # fresh PVC shadows /home/node/.letta — brand-new agents deploy WITHOUT the
+  # mods unless we install them here. Exact-version check per mod: a missing
+  # or WRONG version forces reinstall. LOUD failure: any install or verify
+  # failure aborts the deploy (the agent would silently lack tools).
+  #
+  # Standard set + versions (mirrors ya-glm-l's verified ~/.letta/mods):
+  #   npm:@letta-ai/web-search@0.1.0        (tool: web_search)
+  #   npm:@letta-ai/memfs-search@0.1.1
+  #   npm:@letta-ai/plan-mode@0.1.1
+  #   npm:@letta-ai/image-understanding@0.1.0
+  MODS=(
+    "npm:@letta-ai/web-search@0.1.0"
+    "npm:@letta-ai/memfs-search@0.1.1"
+    "npm:@letta-ai/plan-mode@0.1.1"
+    "npm:@letta-ai/image-understanding@0.1.0"
+  )
+  LETTA_JS="/usr/local/lib/node_modules/@letta-ai/letta-code/letta.js"
+  for _mod in "${MODS[@]}"; do
+    _src="${_mod%@*}"
+    if ! kubectl exec "$POD" -- bash -c "HOME=/home/node node $LETTA_JS mods list" 2>&1 \
+        | grep -Fq "$_mod"; then
+      echo "→ installing mod $_mod (missing or wrong version)"
+      if ! kubectl exec "$POD" -- bash -c "HOME=/home/node node $LETTA_JS install '$_mod'" 2>&1; then
+        echo "✗ FATAL: mod install failed: $_mod — agent will lack its tools; aborting deploy" >&2
+        exit 1
+      fi
+    fi
+  done
+  # Verify: every mod must now list at its exact pinned version.
+  _modlist=$(kubectl exec "$POD" -- bash -c "HOME=/home/node node $LETTA_JS mods list" 2>&1) || {
+    echo "✗ FATAL: could not read mods list from pod — aborting deploy" >&2; exit 1; }
+  for _mod in "${MODS[@]}"; do
+    echo "$_modlist" | grep -Fq "$_mod" || {
+      echo "✗ FATAL: mod not present after install: $_mod — aborting deploy" >&2; exit 1; }
+  done
+  echo "→ mod set verified: ${MODS[*]}"
+  unset _mod _src _modlist MODS LETTA_JS
 
   echo "→ Letta configured"
 fi
