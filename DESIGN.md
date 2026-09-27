@@ -105,3 +105,50 @@ prompt -> real web_search call)" — that verification actually ran AFTER the co
 The results were valid but the claim's ordering was false. Rule: verification first,
 paste the output, then commit. Verification performed only after committing must be
 described in a follow-up commit, not in the original message.
+
+
+---
+
+## Prompt Distributor (queue layer)
+
+Between the agent's MCP door and the agent's brain sits a Redis-backed queue
+(inside `kube-scripts/mcp_server.py`; deployed Redis: `kube-scripts/redis.yaml`,
+one shared instance per cluster, reachable from every hostNetwork agent pod at
+`redis://127.0.0.1:6379/0`, overridable via `REDIS_URL`).
+
+`letta_prompt` no longer spawns the Letta CLI immediately. It ENQUEUES the
+message (tagged with a source id = MCP session id or explicit `source` arg);
+a single in-pod drain worker feeds the agent ONE prompt at a time. N rapid
+prompts = N queued runs, never N parallel runs racing the same agent state.
+
+**Tool signatures**:
+
+- `letta_prompt(prompt, stream=false, json=false, new_chat=false,
+  mode="direct", source="")`
+  - `mode="direct"` (default): enqueue and WAIT for the reply (synchronous,
+    no timeout — long jobs are fine).
+  - `mode="inbox"`: enqueue, return a message id immediately, do NOT wait.
+    Fetch the result later via `letta_queue_status`.
+  - `stream`/`json`/`new_chat` semantics unchanged from letta-p.py.
+- `letta_queue_status()`: pending queue + last 20 processed results (ids,
+  sources, timestamps, elided outputs).
+
+**Queue semantics per agent** (namespaced by unique MCP_PORT / `QUEUE_NAME`,
+so one Redis serves the whole fleet): list-backed FIFO; processed results kept
+in Redis with a 7-day TTL for inbox-mode delivery and inspection.
+
+**Ordering rules (verbatim)**:
+
+a. first message in = processed first
+b. then drain ALL remaining messages from that same source before anyone else
+c. when empty, move to the NEXT MOST RECENT source and drain it fully
+d. FIFO within a source
+
+(source = the MCP client/session that enqueued; each enqueued message is
+tagged with a source id.)
+
+**Degradation**: if Redis is unreachable, `mcp_server.py` exits loudly at
+startup (fail-fast ping) and the drain worker retries forever with a 1s
+backoff; `letta_prompt` calls fail with a connection error rather than
+silently bypassing the queue. The queue is the ONLY path to the agent brain
+via MCP — there is deliberately no fallback to direct spawning.

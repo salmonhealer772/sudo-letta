@@ -1,0 +1,52 @@
+# Shared Redis for the sudo-letta prompt distributor (queue layer).
+#
+# One small Redis instance for the WHOLE letta fleet. Every sudo-letta pod
+# runs hostNetwork:true, so "localhost:6379" inside any agent pod reaches
+# this server. Each agent namespaces its queue by its unique MCP_PORT/POD_NAME
+# (QUEUE_NAME in mcp_server.py), so one Redis serves all agents safely.
+#
+# Deploy:  kubectl apply -f kube-scripts/redis.yaml
+# (up.sh does this automatically before applying an agent.)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sudo-letta-redis
+  labels:
+    app: sudo-letta-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sudo-letta-redis
+  template:
+    metadata:
+      labels:
+        app: sudo-letta-redis
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        args: ["redis-server", "--bind", "127.0.0.1", "--save", "", "--appendonly", "no"]
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sudo-letta-redis
+  labels:
+    app: sudo-letta-redis
+spec:
+  selector:
+    app: sudo-letta-redis
+  ports:
+  - port: 6379
+    targetPort: 6379

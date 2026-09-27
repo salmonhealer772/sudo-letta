@@ -75,7 +75,7 @@ COPY kube-scripts/mcp_entrypoint.sh /opt/letta-mcp/mcp_entrypoint.sh
 # durable JSONL log on the agent PVC, and serves a live HTTP tap.
 COPY kube-scripts/watch_sidecar.py /opt/letta-watch/watch_sidecar.py
 RUN chmod +x /opt/letta-mcp/mcp_entrypoint.sh && \
-    pip3 install --no-cache-dir --break-system-packages fastmcp==4.0.9 && \
+    pip3 install --no-cache-dir --break-system-packages fastmcp==4.0.9 redis==5.2.1 && \
     chown -R node:node /opt/letta-mcp
 
 USER node

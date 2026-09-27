@@ -308,6 +308,8 @@ _import_image() {
   fi
 }
 
+# Shared Redis for the prompt distributor queue (safe to re-apply)
+kubectl apply -f "${SCRIPT_DIR}/redis.yaml" --validate=false >/dev/null 2>&1 || true
 echo "→ Importing images..."
 _import_image sudo-letta:latest
 

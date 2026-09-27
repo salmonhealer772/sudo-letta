@@ -184,3 +184,21 @@ auto-normalizes on every deploy: ghost records are removed (the pinned
 `settings.json.bak-ghosts`). For pods you don't want to redeploy, run
 `bash kube-scripts/fix-agent-records.sh --<name>` (grep-style name resolution)
 to do the same cleanup on demand.
+
+
+### Prompt distributor (queue layer)
+
+`letta_prompt` on the per-pod MCP server is queue-driven: the prompt is
+enqueued in Redis (shared instance, `kube-scripts/redis.yaml`, applied
+automatically by `up.sh`) and a single drain worker feeds the agent ONE
+prompt at a time.
+
+- `letta_prompt(prompt, stream?, json?, new_chat?, mode="direct"|"inbox", source?)`
+  - `direct` (default): enqueue and wait for the reply (no timeout).
+  - `inbox`: return a message id immediately; check `letta_queue_status`.
+- Ordering: first-in first-out per source; the drain worker finishes ALL
+  pending messages of the current source before moving to the next most
+  recent source (FIFO within a source). Source defaults to the MCP session id.
+- `letta_queue_status()`: pending queue + recent processed results.
+
+See DESIGN.md "Prompt Distributor (queue layer)" for full semantics.
