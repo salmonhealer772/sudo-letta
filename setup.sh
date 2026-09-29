@@ -88,10 +88,12 @@ if ! grep -q '^API_KEY=' "$ENV_FILE" 2>/dev/null || \
       echo "API_KEY=$API_KEY"
     } | sudo tee "$ENV_FILE" > /dev/null
   else
-    echo "" >> "$ENV_FILE"
-    echo "# sudo-letta config (set by setup.sh)" >> "$ENV_FILE"
-    echo "LLM_PROVIDER=$PROVIDER" >> "$ENV_FILE"
-    echo "API_KEY=$API_KEY" >> "$ENV_FILE"
+    {
+      echo ""
+      echo "# sudo-letta config (set by setup.sh)"
+      echo "LLM_PROVIDER=$PROVIDER"
+      echo "API_KEY=$API_KEY"
+    } >> "$ENV_FILE"
   fi
 
   # If it's an OpenAI-compatible provider, ask for base URL
