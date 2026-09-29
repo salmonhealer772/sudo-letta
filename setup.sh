@@ -17,10 +17,24 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# _retry N "description" cmd [args...] — run cmd up to N times with backoff.
+# Makes network/build steps survive transient failures instead of dying once.
+_retry() {
+  local n="$1" desc="$2"; shift 2
+  local i=1
+  while (( i <= n )); do
+    if "$@"; then return 0; fi
+    echo "⚠ ($desc) attempt $i/$n failed — retrying in ${i}s..." >&2
+    sleep "$i"
+    (( i++ ))
+  done
+  return 1
+}
+
 # --- Build image ---
 if ! docker image inspect sudo-letta:latest &>/dev/null; then
   echo "→ Building sudo-letta image (may take 2-3 min)..."
-  docker build -t sudo-letta:latest -f "$SCRIPT_DIR/Dockerfile" "$SCRIPT_DIR" || {
+  _retry 3 "docker build sudo-letta" docker build -t sudo-letta:latest -f "$SCRIPT_DIR/Dockerfile" "$SCRIPT_DIR" || {
     echo "Docker build failed." >&2
     exit 1
   }
