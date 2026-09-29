@@ -174,7 +174,7 @@ if [[ -n "${GLIMOR_DIR:-}" ]]; then
         imagePullPolicy: IfNotPresent
         securityContext:
           runAsUser: 0
-        command: [\"sh\", \"-c\", \"if test -f /home/node/.letta/.glimor-seeded; then exit 0; fi; if ! test -d /seed/letta; then exit 1; fi; if ! test -f /seed/letta/settings.json; then exit 1; fi; cp -a /seed/letta/. /home/node/.letta/ && chown -R 1000:1000 /home/node/.letta && touch /home/node/.letta/.glimor-seeded\"]
+        command: [\"sh\", \"-c\", \"if test -f /home/node/.letta/.glimor-seeded; then exit 0; fi; if ! test -d /seed/letta; then exit 1; fi; if ! test -f /seed/letta/settings.json; then exit 1; fi; cp -a /seed/letta/. /home/node/.letta/ && cd /home/node/.letta/lc-local-backend/memfs/*/memory && git init -q && git add -A && git -c user.email=glimor@localhost -c user.name=glimor commit -q -m seed-fork-state && chown -R 1000:1000 /home/node/.letta && touch /home/node/.letta/.glimor-seeded\"]
         volumeMounts:
         - name: data
           mountPath: /home/node/.letta
