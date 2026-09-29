@@ -297,15 +297,44 @@ fi
 echo "→ YAML written: $YAML"
 
 # ── Import image into containerd ──
+# The pod runs `sudo-letta:latest` with imagePullPolicy: IfNotPresent, so a
+# silent import failure poisons the deploy: the pod comes up with a MISSING
+# image and hits ImagePullBackOff / ErrImageNeverPull. Import must be LOUD and
+# absence FATAL. No `sudo` (up.sh already runs as root via `$SUDO bash`) and no
+# `2>/dev/null` swallowing the real error.
+_ctr_images() {
+  k3s ctr images ls -q 2>/dev/null || ctr -n k8s.io images ls -q 2>/dev/null || true
+}
+
+_image_present() {
+  local img="$1" refs
+  refs="$(_ctr_images)"
+  grep -Fxq "$img" <<<"$refs" && return 0
+  grep -Fxq "docker.io/library/$img" <<<"$refs" && return 0
+  return 1
+}
+
 _import_image() {
   local img="$1"
-  if docker save "$img" 2>/dev/null | sudo k3s ctr image import - 2>/dev/null; then
+  if ! docker image inspect "$img" >/dev/null 2>&1; then
+    echo "✗ FATAL: docker image $img does not exist locally — nothing to import." >&2
+    echo "  Build it first:  bash setup.sh" >&2
+    exit 1
+  fi
+  if docker save "$img" | k3s ctr image import - ; then
     echo "→ $img imported via k3s ctr"
-  elif docker save "$img" 2>/dev/null | sudo ctr -n k8s.io image import - 2>/dev/null; then
+  elif docker save "$img" | ctr -n k8s.io image import - ; then
     echo "→ $img imported via ctr"
   else
-    echo "⚠ Could not import $img — it might already be present"
+    echo "⚠ both import paths reported failure for $img — verifying containerd..." >&2
   fi
+  if ! _image_present "$img"; then
+    echo "✗ FATAL: $img is NOT in containerd after import." >&2
+    echo "  The pod would come up with a missing image (imagePullPolicy: IfNotPresent) and hit ImagePullBackOff." >&2
+    echo "  Deploy aborted. Import manually or fix containerd, then re-run." >&2
+    exit 1
+  fi
+  echo "→ $img present in containerd"
 }
 
 # Shared Redis for the prompt distributor queue (idempotent kubectl apply; LOUD on failure)
