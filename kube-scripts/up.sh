@@ -5,11 +5,13 @@ set -uo pipefail
 # Usage: bash kube-scripts/up.sh --name
 
 NAME=""
+GLIMOR_DIR=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --name|--*)  NAME="${1#--}"; shift ;;
-    *)           echo "Usage: bash kube-scripts/up.sh --name" >&2; exit 1 ;;
+    --from-glimor) GLIMOR_DIR="$2"; shift 2 ;;
+    --name|--*)    NAME="${1#--}"; shift ;;
+    *)             echo "Usage: bash kube-scripts/up.sh --name [--from-glimor <dir>]" >&2; exit 1 ;;
   esac
 done
 
@@ -151,6 +153,40 @@ ENV_YAML+="
         - name: MCP_PORT
           value: \"${MCP_PORT}\""
 
+# ── Optional glimor seed (initContainer seeds the PVC BEFORE the agent runs) ──
+# When --from-glimor <dir> is given, an initContainer copies <dir>/letta/ into
+# /home/node/.letta BEFORE the letta process starts, so a fork wakes as the
+# seeded agent (never a blank Tutor). Idempotent: a .glimor-seeded marker skips
+# re-seeding on restarts (preserving the fork's runtime changes). A missing or
+# invalid glimor fails the initContainer (and the deploy) loudly — never a
+# silent blank-agent fallback.
+SEED_INITCONTAINERS=""
+SEED_VOLUME=""
+if [[ -n "${GLIMOR_DIR:-}" ]]; then
+  if [[ ! -d "$GLIMOR_DIR/letta" ]] || [[ ! -f "$GLIMOR_DIR/letta/settings.json" ]]; then
+    echo "✗ --from-glimor $GLIMOR_DIR: missing letta/ or letta/settings.json (a valid Letta glimor needs both)" >&2
+    exit 1
+  fi
+  GLIMOR_ABS="$(cd "$GLIMOR_DIR" && pwd)"
+  SEED_INITCONTAINERS="      initContainers:
+      - name: seed-glimor
+        image: sudo-letta:latest
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+        command: [\"sh\", \"-c\", \"if test -f /home/node/.letta/.glimor-seeded; then exit 0; fi; if ! test -d /seed/letta; then exit 1; fi; if ! test -f /seed/letta/settings.json; then exit 1; fi; cp -a /seed/letta/. /home/node/.letta/ && chown -R 1000:1000 /home/node/.letta && touch /home/node/.letta/.glimor-seeded\"]
+        volumeMounts:
+        - name: data
+          mountPath: /home/node/.letta
+        - name: seed
+          mountPath: /seed
+          readOnly: true"
+  SEED_VOLUME="      - name: seed
+        hostPath:
+          path: $GLIMOR_ABS
+          type: Directory"
+fi
+
 cat > "$YAML" <<YAMLEOF
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -191,6 +227,7 @@ spec:
       - ip: "127.0.0.1"
         hostnames:
         - "$NODE_HOSTNAME"
+$SEED_INITCONTAINERS
       containers:
       - name: sudo-letta
         image: sudo-letta:latest
@@ -230,6 +267,7 @@ $ENV_YAML
       - name: data
         persistentVolumeClaim:
           claimName: $DEPLOY-data
+$SEED_VOLUME
       - name: docker-sock
         hostPath:
           path: /var/run/docker.sock
