@@ -32,7 +32,11 @@ YAML="$YAML_DIR/$NAME.yaml"
 
 # Hostname used for the pod's /etc/hosts hostAliases entry — lets sudo resolve the
 # host's own hostname (avoids `sudo: unable to resolve host <name>` under hostNetwork).
-NODE_HOSTNAME="$(hostname)"
+# hostAliases.hostnames MUST be a lowercase RFC 1123 subdomain: lowercase, only
+# [a-z0-9.-], and must start/end with [a-z0-9]. A raw hostname with uppercase
+# letters (e.g. "LaptopOfBlake") makes kubectl apply reject the Deployment, so
+# normalize here — once, at capture — so every downstream use is already safe.
+NODE_HOSTNAME="$(hostname | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9.-' '-' | sed -E 's/^[-.]+//; s/[-.]+$//')"
 
 # Per-agent MCP server port. Every sudo-letta pod runs hostNetwork:true, so all
 # pods share the node's network namespace and a single fixed port would collide.
