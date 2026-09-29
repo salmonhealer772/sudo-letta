@@ -1,0 +1,26 @@
+{
+  "name": "@letta-ai/list-siblings",
+  "version": "0.1.0",
+  "description": "Letta Code mod package that adds a list_siblings tool to read the live fleet roster.",
+  "type": "module",
+  "keywords": [
+    "letta-package",
+    "letta-mod",
+    "letta-code",
+    "fleet",
+    "siblings"
+  ],
+  "files": [
+    "MOD.md",
+    "mods"
+  ],
+  "letta": {
+    "manifestVersion": 1,
+    "mods": [
+      "./mods/index.mjs"
+    ],
+    "capabilities": [
+      "tools"
+    ]
+  }
+}

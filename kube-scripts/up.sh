@@ -507,20 +507,53 @@ PYEOF' || true
   #   npm:@letta-ai/memfs-search@0.1.1
   #   npm:@letta-ai/plan-mode@0.1.1
   #   npm:@letta-ai/image-understanding@0.1.0
-  MODS=(
+  # Official npm mods (published to the npm registry): the install specifier and
+  # the verify string are the same `npm:<name>@<version>`.
+  NPM_MODS=(
     "npm:@letta-ai/web-search@0.1.0"
     "npm:@letta-ai/memfs-search@0.1.1"
     "npm:@letta-ai/plan-mode@0.1.1"
     "npm:@letta-ai/image-understanding@0.1.0"
   )
+
+  # Comm-layer mods (list-siblings / message-agent / check-agent). NOT on the
+  # public npm registry: they ship as local packages in this repo's mods/ dir,
+  # are copied into the pod at deploy time, and installed via `letta install
+  # <path>`. letta records a local install's source as `npm:<name>` (from
+  # package.json "name") and its version from package.json "version", so
+  # `mods list` renders exactly `npm:<name>@<version>` — the SAME exact-version
+  # check the npm mods use. Each entry is "<local-package-dir>|<verify-string>".
+  # Canonical source + packaging spec: sudo-fleet/docs/comm-mods-PACKAGING.md.
+  COMM_MODS=(
+    "mods/list-siblings|npm:@letta-ai/list-siblings@0.1.0"
+    "mods/check-agent|npm:@letta-ai/check-agent@0.1.0"
+    "mods/message-agent|npm:@letta-ai/message-agent@0.1.0"
+  )
+
   LETTA_JS="/usr/local/lib/node_modules/@letta-ai/letta-code/letta.js"
-  for _mod in "${MODS[@]}"; do
-    _src="${_mod%@*}"
+
+  # Ship the comm mod packages into the pod once (the pod cannot see the host's
+  # repo). Idempotent: re-copied every deploy, installed only if missing/wrong.
+  if [[ ! -d "$REPO_DIR/mods" ]]; then
+    echo "✗ FATAL: $REPO_DIR/mods missing — comm mods cannot be installed; aborting deploy" >&2
+    exit 1
+  fi
+  kubectl exec "$POD" -- bash -c "rm -rf /tmp/letta-mods; mkdir -p /tmp/letta-mods" 2>/dev/null || true
+  if ! kubectl cp "$REPO_DIR/mods/." "$POD:/tmp/letta-mods/"; then
+    echo "✗ FATAL: could not copy comm mods into pod — aborting deploy" >&2
+    exit 1
+  fi
+
+  for _entry in "${NPM_MODS[@]}" "${COMM_MODS[@]}"; do
+    _spec="${_entry%%|*}"
+    _verify="${_entry##*|}"
+    # comm mods live under mods/ on the host -> /tmp/letta-mods/ in the pod
+    [[ "$_spec" == mods/* ]] && _spec="/tmp/letta-mods/${_spec#mods/}"
     if ! kubectl exec "$POD" -- bash -c "HOME=/home/node node $LETTA_JS mods list" 2>&1 \
-        | grep -Fq "$_mod"; then
-      echo "→ installing mod $_mod (missing or wrong version)"
-      if ! kubectl exec "$POD" -- bash -c "HOME=/home/node node $LETTA_JS install '$_mod'" 2>&1; then
-        echo "✗ FATAL: mod install failed: $_mod — agent will lack its tools; aborting deploy" >&2
+        | grep -Fq "$_verify"; then
+      echo "→ installing mod $_verify (missing or wrong version)"
+      if ! kubectl exec "$POD" -- bash -c "HOME=/home/node node $LETTA_JS install '$_spec'" 2>&1; then
+        echo "✗ FATAL: mod install failed: $_verify — agent will lack its tools; aborting deploy" >&2
         exit 1
       fi
     fi
@@ -528,12 +561,13 @@ PYEOF' || true
   # Verify: every mod must now list at its exact pinned version.
   _modlist=$(kubectl exec "$POD" -- bash -c "HOME=/home/node node $LETTA_JS mods list" 2>&1) || {
     echo "✗ FATAL: could not read mods list from pod — aborting deploy" >&2; exit 1; }
-  for _mod in "${MODS[@]}"; do
-    echo "$_modlist" | grep -Fq "$_mod" || {
-      echo "✗ FATAL: mod not present after install: $_mod — aborting deploy" >&2; exit 1; }
+  for _entry in "${NPM_MODS[@]}" "${COMM_MODS[@]}"; do
+    _verify="${_entry##*|}"
+    echo "$_modlist" | grep -Fq "$_verify" || {
+      echo "✗ FATAL: mod not present after install: $_verify — aborting deploy" >&2; exit 1; }
   done
-  echo "→ mod set verified: ${MODS[*]}"
-  unset _mod _src _modlist MODS LETTA_JS
+  echo "→ mod set verified: ${NPM_MODS[*]} ${COMM_MODS[*]}"
+  unset _entry _spec _verify _modlist NPM_MODS COMM_MODS LETTA_JS
 
   echo "→ Letta configured"
 fi
