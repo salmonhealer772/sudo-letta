@@ -569,6 +569,43 @@ PYEOF' || true
   echo "→ mod set verified: ${NPM_MODS[*]} ${COMM_MODS[*]}"
   unset _entry _spec _verify _modlist NPM_MODS COMM_MODS LETTA_JS
 
+  # Comm-layer skills (list-siblings / message-agent / check-agent). The mods
+  # above register the TOOLS into the agent's tool schema; these are the
+  # per-agent MemFS procedure docs that make the agent actually reach for them.
+  # They ship as vendored packages in this repo's skills/ dir (canonical source:
+  # sudo-fleet branch comm-skills-tools -> skills/), are copied into the pod at
+  # deploy time exactly like mods/, and dropped into the agent's MemFS skills/
+  # dir — the dir Letta auto-loads skills from, and the same dir the
+  # --from-glimor seed populates from the glimor. Idempotent: re-copied every
+  # deploy, and the MemFS is git-committed so the seeded skills actually load
+  # (an uncommitted MemFS is silently ignored — the same reason the glimor seed
+  # initContainer commits). On a brand-new no-glimor deploy the MemFS does not
+  # exist until the agent is first created, so a missing dir is a WARN here, not
+  # a fatal (the skills land on the next deploy or the first --from-glimor fork).
+  if [[ ! -d "$REPO_DIR/skills" ]]; then
+    echo "✗ FATAL: $REPO_DIR/skills missing — comm skills cannot be seeded; aborting deploy" >&2
+    exit 1
+  fi
+  kubectl exec "$POD" -- bash -c "rm -rf /tmp/comm-skills; mkdir -p /tmp/comm-skills" 2>/dev/null || true
+  if ! kubectl cp "$REPO_DIR/skills/." "$POD:/tmp/comm-skills/"; then
+    echo "✗ FATAL: could not copy comm skills into pod — aborting deploy" >&2
+    exit 1
+  fi
+  _memfs_memory="$(kubectl exec "$POD" -- bash -c 'for d in /home/node/.letta/lc-local-backend/memfs/*/memory; do [ -d "$d" ] && { echo "$d"; break; }; done' 2>/dev/null)"
+  if [[ -n "$_memfs_memory" ]]; then
+    if ! kubectl exec "$POD" -- bash -c "mkdir -p '$_memfs_memory/skills' && cp -a /tmp/comm-skills/. '$_memfs_memory/skills/' && chown -R node:node '$_memfs_memory/skills'"; then
+      echo "✗ FATAL: could not seed comm skills into agent MemFS — aborting deploy" >&2
+      exit 1
+    fi
+    # Commit the MemFS so the seeded skills load (best-effort: a no-op commit on
+    # an already-clean tree is fine, and never a reason to fail the deploy).
+    kubectl exec "$POD" -- bash -c "git -C '$_memfs_memory' init -q -b main 2>/dev/null; git -C '$_memfs_memory' add -A 2>/dev/null && git -C '$_memfs_memory' -c user.email=factory@localhost -c user.name=factory commit -q -m 'seed comm skills' >/dev/null 2>&1 || true"
+    echo "→ comm skills seeded into agent MemFS: list-siblings message-agent check-agent"
+  else
+    echo "⚠ no MemFS memory dir found (agent not created yet) — comm skills will land on the next deploy or the first --from-glimor fork" >&2
+  fi
+  unset _memfs_memory
+
   echo "→ Letta configured"
 fi
 echo "  Talk:   kubectl exec -it deploy/$DEPLOY -- bash -c 'letta'"
