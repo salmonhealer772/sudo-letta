@@ -150,6 +150,8 @@ ENV_YAML+="
           value: \"/home/node\"
         - name: LETTA_HOME
           value: \"/home/node/.letta\"
+        - name: LETTA_LOCAL_BACKEND_EXPERIMENTAL
+          value: \"1\"
         - name: MCP_PORT
           value: \"${MCP_PORT}\""
 
