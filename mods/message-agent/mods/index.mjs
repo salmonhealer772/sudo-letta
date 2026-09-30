@@ -274,7 +274,7 @@ export default function activate(letta) {
   return letta.tools.register({
     name: "message_agent",
     description:
-      "Message any sibling agent in this sudo-fleet by bare name and return its reply. This is the PRIMARY way agents work together -- delegate, ask, coordinate, hand off. Resolves the sibling from the live cluster roster (exact -> case-insensitive -> unique substring -> error), reaches its -mcp door over MCP, and calls its prompt tool (letta_prompt for a Letta planner, hermes_prompt for a Hermes engineer -- auto-detected). mode='direct' (default) waits for the full reply with no timeout; mode='inbox' enqueues and returns a message id immediately. new_chat=true starts a fresh conversation (planners only; ignored for engineers). json=true returns the structured reply. source tags the message for group-by-source ordering in the recipient's queue.",
+      "Message any sibling agent in this sudo-fleet by bare name and return its reply. This is the PRIMARY way agents work together -- delegate, ask, coordinate, hand off. Resolves the sibling from the live cluster roster (exact -> case-insensitive -> unique substring -> error), reaches its -mcp door over MCP, and calls its prompt tool (letta_prompt for a Letta planner, hermes_prompt for a Hermes engineer -- auto-detected). mode='inbox' (default) sends and returns a message id immediately; mode='direct' waits for the full reply with no timeout (explicit opt-in). new_chat=true starts a fresh conversation (planners only; ignored for engineers). json=true returns the structured reply. source tags the message for group-by-source ordering in the recipient's queue.",
     parameters: {
       type: "object",
       properties: {
@@ -291,7 +291,7 @@ export default function activate(letta) {
           type: "string",
           enum: ["direct", "inbox"],
           description:
-            "'direct' (default) = send and WAIT for the full reply (no timeout, safe for long jobs). 'inbox' = enqueue and return a message id immediately; fetch the reply later via the sibling's queue_status tool.",
+            "'inbox' (default) = send and return a message id immediately (fire-and-forget; fetch the reply later via the sibling's queue_status tool). 'direct' = send and WAIT for the full reply (no timeout, safe for long jobs) -- an explicit opt-in.",
         },
         new_chat: {
           type: "boolean",
@@ -318,7 +318,7 @@ export default function activate(letta) {
       const args = (ctx && ctx.args) || {};
       const sibling = args.sibling;
       const prompt = args.prompt;
-      const mode = args.mode === "inbox" ? "inbox" : "direct";
+      const mode = args.mode === "direct" ? "direct" : "inbox";
       const json = !!args.json;
       const newChat = !!args.new_chat;
       const source = typeof args.source === "string" ? args.source.trim() : "";
