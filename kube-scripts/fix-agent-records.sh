@@ -15,6 +15,9 @@ set -uo pipefail
 
 NAME=""
 
+# Parses --name (or any --flag) as the agent name and rejects bare args,
+# because the name is resolved against live sudo-letta deployments; if missing,
+# print usage + exit 1 before any kubectl call.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --name|--*)  NAME="${1#--}"; shift ;;

@@ -43,11 +43,18 @@ cleanup() {
 }
 trap 'cleanup' INT TERM EXIT
 
+# Lists running sudo-letta deployments (label app=sudo-letta), stripping the
+# `sudo-` prefix for display, because name resolution and --list both operate
+# on bare agent names; if kubectl fails, the sed/sort pipeline yields empty and
+# the caller reports "failed to list".
 list_agents() {
   kubectl get deploy -l app=sudo-letta \
     -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
     | sed -n 's/^sudo-//p' | sort
 }
+# Prints the header comment block (lines 2-17) as help text, because the usage
+# docs live in the script header as comments and are stripped of the leading
+# "# " for display; if the line range drifts, the help would silently miss lines.
 usage() {
   sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
 }

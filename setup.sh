@@ -9,6 +9,9 @@ echo "└───────────────────────�
 echo ""
 
 # --- Check Docker ---
+# Verifies the Docker daemon is reachable and this user is in the docker group,
+# because every later step (build, image save, exec) needs a live daemon; if the
+# check fails, print the fix and exit 1 before anything else is attempted.
 if ! docker info &>/dev/null; then
   echo "Docker is not running or this user isn't in the docker group."
   echo "Fix: sudo usermod -aG docker \$USER && newgrp docker"
@@ -32,6 +35,10 @@ _retry() {
 }
 
 # --- Build image ---
+# Builds sudo-letta:latest only if it is not already present locally, because an
+# existing image is reused as-is to avoid a 2-3 min rebuild; if the image is
+# absent, the build retries 3x (network/toolchain flakiness) and, if it still
+# fails, exits 1 with a message rather than continuing to a broken deploy.
 if ! docker image inspect sudo-letta:latest &>/dev/null; then
   echo "→ Building sudo-letta image (may take 2-3 min)..."
   _retry 3 "docker build sudo-letta" docker build -t sudo-letta:latest -f "$SCRIPT_DIR/Dockerfile" "$SCRIPT_DIR" || {
@@ -44,7 +51,12 @@ else
 fi
 
 # --- Create config directory inside the repo ---
-# Detect if dir is root-owned and use sudo if needed
+# Detect if dir is root-owned and use sudo if needed.
+# _writable probes by appending a no-op line to the .env: a root-owned repo
+# denies writes to a non-root user, so the probe's success/failure decides
+# whether credential writes need sudo; if the probe fails, fall back to
+# sudo mkdir/tee, and if sudo is itself unavailable the script errors out here
+# before any credentials are written.
 _writable() { echo "" >> "$1" 2>/dev/null; }
 
 if ! _writable "$SCRIPT_DIR/.sudo-letta/.env"; then
@@ -57,6 +69,11 @@ else
 fi
 
 # --- Prompt for API key ---
+# The .sudo-letta/.env file is the pre-seed that skips prompts: provider + API
+# key are prompted for ONLY when the file is missing an API_KEY line or holds
+# an empty one, because a previously written key is reused verbatim on re-runs
+# (non-interactive CI / unattended re-setup); if the user then enters an empty
+# provider or key, exit 1 with "Setup incomplete" so nothing is half-written.
 ENV_FILE="$SCRIPT_DIR/.sudo-letta/.env"
 
 if ! grep -q '^API_KEY=' "$ENV_FILE" 2>/dev/null || \
@@ -112,6 +129,10 @@ if ! grep -q '^API_KEY=' "$ENV_FILE" 2>/dev/null || \
 fi
 
 # --- Create default settings.json template ---
+# Writes a permissive default settings.json only if it does not already exist,
+# because the file both enables token streaming and pre-grants bash/read/write
+# so the agent starts without an interactive permission prompt; if the file
+# already exists it is left untouched (preserving any operator edits).
 SETTINGS_FILE="$SCRIPT_DIR/.sudo-letta/settings.json"
 if [[ ! -f "$SETTINGS_FILE" ]]; then
   if $USE_SUDO; then
@@ -145,7 +166,10 @@ EOF
 fi
 
 # --- Shared Redis for the prompt distributor queue ---
-# Applied now if kubectl + a cluster are available; otherwise applied on first up.sh deploy.
+# Applies the shared Redis (prompt-distributor queue) immediately only if
+# kubectl and a reachable cluster exist, because setup is often run before the
+# cluster is up; if kubectl apply fails, abort loudly (the queue is required
+# for agent deploys); if kubectl/cluster are absent, defer to the first up.sh.
 if command -v kubectl >/dev/null 2>&1 && kubectl cluster-info >/dev/null 2>&1; then
   echo "→ Applying shared Redis (kube-scripts/redis.yaml)..."
   if ! kubectl apply -f "$SCRIPT_DIR/kube-scripts/redis.yaml" --validate=false; then

@@ -7,6 +7,10 @@ set -uo pipefail
 NAME=""
 GLIMOR_DIR=""
 
+# Parses args: --from-glimor <dir> sets the seed source, and --name / any other
+# --flag is taken as the agent name (bare names are rejected), because the name
+# drives every downstream label, port, and Service; an unknown arg or missing
+# name fails fast with usage + exit 1 instead of a half-deploy.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --from-glimor) GLIMOR_DIR="$2"; shift 2 ;;
@@ -15,12 +19,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Requires a name, because an unnamed deploy cannot build unique resource names
+# or ports; if missing, print usage and exit 1.
 if [[ -z "$NAME" ]]; then
   echo "Usage: bash kube-scripts/up.sh --name" >&2
   echo "Example: bash kube-scripts/up.sh --alice" >&2
   exit 1
 fi
 
+# Rejects the reserved name "all" (case-insensitive), because --ALL is the
+# rm-containers.sh bulk-removal switch and a deploy named "all" would collide;
+# if used, exit 1.
 if [[ "${NAME,,}" == "all" ]]; then
   echo "'--ALL' is reserved. Pick a different name." >&2; exit 1
 fi
@@ -56,7 +65,10 @@ if [[ "$WATCH_PORT" == "$MCP_PORT" ]]; then
   WATCH_PORT=$(( MCP_PORT + 1 ))
 fi
 
-# If repo is root-owned and we're not root, bail early
+# If repo is root-owned and we're not root, bail early: the script must write
+# generated YAML under the repo's deployments/ dir, and as a non-root user that
+# write would fail; if the repo is unwritable and we are not root, exit 1 with
+# a pointer to re-run under sudo.
 if [[ ! -w "$REPO_DIR" ]] && [[ "$(id -u)" != "0" ]]; then
   echo "Repo is root-owned. Run with: sudo bash kube-scripts/up.sh --$NAME" >&2
   exit 1
@@ -64,7 +76,11 @@ fi
 
 mkdir -p "$YAML_DIR" 2>/dev/null || true
 
-# Auto-detect kubeconfig (sudo changes HOME, kubectl can lose it)
+# Auto-detect kubeconfig (sudo changes HOME, kubectl can lose it).
+# Probes the known k3s/world15/user config paths in order because the script is
+# often run under sudo (which swaps HOME) and an unset KUBECONFIG makes every
+# kubectl call target the wrong or no cluster; if none of the paths exist,
+# exit 1 with a hint instead of deploying to a silently wrong cluster.
 if [[ -z "${KUBECONFIG:-}" ]]; then
   for cfg in "/etc/rancher/k3s/k3s.yaml" "/home/world15/.kube/config" "$HOME/.kube/config"; do
     if [[ -f "$cfg" ]]; then export KUBECONFIG="$cfg"; break; fi
@@ -162,6 +178,18 @@ ENV_YAML+="
 # re-seeding on restarts (preserving the fork's runtime changes). A missing or
 # invalid glimor fails the initContainer (and the deploy) loudly — never a
 # silent blank-agent fallback.
+#
+# The initContainer's command also git-commits the seeded MemFS
+# (lc-local-backend/memfs/*/memory) before Letta starts, because Letta only
+# loads a persona from a COMMITTED MemFS — an uncommitted brain is silently
+# ignored and the fork would wake blank. The commit passes
+# `-c safe.directory='*'`: the seed is copied from the foreign-owned, root-owned
+# /seed/letta mount, so a plain `git add` fails with "detected dubious
+# ownership" (exit 128) unless safe.directory is set. The branch is `main` (to
+# match Letta's own MemFS convention, which was previously `master` and caused
+# the persona to be ignored). After the commit, /home/node/.letta is chowned
+# back to uid 1000 (node) and the .glimor-seeded marker is written so restarts
+# skip re-seeding (preserving the fork's runtime changes).
 SEED_INITCONTAINERS=""
 SEED_VOLUME=""
 if [[ -n "${GLIMOR_DIR:-}" ]]; then
@@ -407,6 +435,10 @@ echo "→ Importing images..."
 _import_image sudo-letta:latest
 
 # ── Apply ──
+# Applies the generated YAML (PVC + Deployment + ConfigMap + Services), because
+# that single manifest materializes the agent, its memory volume, and its
+# MCP/watch endpoints; if apply fails, exit 1 with a pointer to
+# `kubectl cluster-info` rather than leaving a half-created deploy.
 echo "→ Deploying..."
 if ! kubectl apply -f "$YAML" --validate=false; then
   echo "✗ kubectl apply failed. Check: kubectl cluster-info" >&2
@@ -417,6 +449,11 @@ echo ""
 echo "✓ $DEPLOY deployed"
 
 # ── Wait for pod and configure Letta ──
+# Waits (best-effort, 60s) for the pod to become ready, then resolves its name
+# and connects Letta to the provider, because the agent's provider must be
+# configured before the first prompt; the wait is `|| true` so a slow image
+# pull does not abort the deploy, and the connect failure is non-fatal
+# (reported and left for manual config).
 echo "→ Waiting for pod to be ready..."
 kubectl wait --for=condition=ready pod -l agent=$NAME --timeout=60s 2>/dev/null || true
 
@@ -429,7 +466,12 @@ if [[ -n "$POD" ]]; then
 
   kubectl exec "$POD" -- bash -c "$CONNECT_CMD" 2>&1 | tail -3 || echo "⚠ Letta connect failed (may need manual config)"
 
-  # Create settings with permissions
+  # Create settings with permissions.
+  # Writes a permissive settings.json inside the pod only if it is missing or
+  # empty, because the file pre-grants bash/read/write so the agent starts
+  # without an interactive permission prompt; the heredoc runs as the pod's
+  # default (root) user then chowns to node. Failure here is swallowed
+  # (|| true) because the seed or a prior run usually already created it.
   kubectl exec "$POD" -- bash -c '
     SETTINGS_FILE="/home/node/.letta/settings.json"
     mkdir -p "$(dirname "$SETTINGS_FILE")"

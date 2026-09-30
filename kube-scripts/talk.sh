@@ -5,6 +5,8 @@ set -euo pipefail
 # Usage: bash kube-scripts/talk.sh --name
 
 NAME=""
+# Parses --name (or any --flag) as the agent name, because the name selects the
+# `deploy/sudo-<name>` to exec into; if missing, print usage + exit 1.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --name|--*)  NAME="${1#--}"; shift ;;
@@ -14,11 +16,14 @@ done
 if [[ -z "$NAME" ]]; then
   echo "Usage: bash kube-scripts/talk.sh --name" >&2; exit 1
 fi
+# Rejects "all" (bulk ops belong to rm-containers.sh), else exit 1.
 if [[ "${NAME,,}" == "all" ]]; then
   echo "Use rm-containers.sh --ALL instead." >&2; exit 1
 fi
 
-# Auto-detect kubeconfig
+# Auto-detect kubeconfig, probing known k3s/world15/user paths because sudo
+# swaps HOME and an unset KUBECONFIG would make the exec target the wrong
+# cluster; if none found, the kubectl exec below fails loudly.
 if [[ -z "${KUBECONFIG:-}" ]]; then
   for cfg in "/etc/rancher/k3s/k3s.yaml" "/home/world15/.kube/config" "$HOME/.kube/config"; do
     if [[ -f "$cfg" ]]; then export KUBECONFIG="$cfg"; break; fi

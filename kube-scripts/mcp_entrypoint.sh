@@ -13,8 +13,18 @@
 
 set -u
 
+# Resolves the listen port from MCP_PORT (injected by up.sh as a unique
+# per-agent port) with an 8000 fallback, because every pod runs
+# hostNetwork:true and a hardcoded port would collide across agents on the same
+# node; if MCP_PORT is unset, the 8000 default keeps the server reachable in
+# simple/docker runs.
 PORT="${MCP_PORT:-8000}"
 
+# Runs the MCP server in a background restart loop, because a single crash
+# would otherwise take the endpoint down for the rest of the pod's life; if the
+# server exits (crash or config error), the `|| true` prevents the loop from
+# dying and it sleeps 2s before retrying. HOME is forced to /home/node so
+# Letta's state resolves against the PVC, not /root.
 (
   while :; do
     HOME=/home/node MCP_PORT="$PORT" python3 /opt/letta-mcp/mcp_server.py || true
@@ -22,4 +32,8 @@ PORT="${MCP_PORT:-8000}"
   done
 ) &
 
+# Keeps the container alive as PID 1 after the MCP loop is backgrounded,
+# because the pod's other flows (letta connect, interactive exec shells,
+# kubectl exec letta) all require a running container; if this tail ever
+# exited, the pod would terminate and Kubernetes would restart it.
 exec tail -f /dev/null

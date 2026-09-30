@@ -6,7 +6,9 @@ set -euo pipefail
 #   bash kube-scripts/rm-containers.sh --name     Remove one
 #   bash kube-scripts/rm-containers.sh --ALL       Nuke ALL sudo-*
 
-# Auto-detect kubeconfig
+# Auto-detect kubeconfig, probing known k3s/world15/user paths because this
+# script is often run under sudo (swaps HOME) and an unset KUBECONFIG would
+# target the wrong cluster; if none found, the kubectl deletes below fail loudly.
 if [[ -z "${KUBECONFIG:-}" ]]; then
   for cfg in "/etc/rancher/k3s/k3s.yaml" "/home/world15/.kube/config" "$HOME/.kube/config"; do
     if [[ -f "$cfg" ]]; then export KUBECONFIG="$cfg"; break; fi
@@ -16,6 +18,10 @@ fi
 NAME=""
 REMOVE_ALL=false
 
+# Parses --name [<name>] (or --name=<name>) for single removal and --ALL/--all
+# for bulk removal, because the two modes differ destructively (single removes
+# one agent's deploy+PVC+YAML, --ALL wipes the whole fleet); an unknown flag
+# prints usage + exit 1.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --name|--name=*)
@@ -31,6 +37,10 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+# Bulk mode: deletes every sudo-letta Deployment and PVC by label and cleans
+# the generated deployments/*.yaml, because --ALL is a full-fleet teardown and
+# the PVCs (agent memory) must go too; failures are tolerated (|| true) so a
+# partially-absent resource does not abort the teardown.
 if $REMOVE_ALL; then
   echo "→ Nuking ALL sudo-* from Kubernetes..."
   kubectl delete deploy -l app=sudo-letta 2>/dev/null || true
@@ -40,6 +50,10 @@ if $REMOVE_ALL; then
   rm -f "$REPO_DIR/deployments"/*.yaml 2>/dev/null || true
   echo "✓ Gone."
 elif [[ -n "$NAME" ]]; then
+  # Single mode: deletes one Deployment AND its PVC (memory is destroyed, unlike
+  # down.sh which preserves it), then removes the generated YAML, because
+  # rm-containers is the destructive path; a missing PVC/YAML is tolerated
+  # (|| true), and a missing Deployment reports "not found" without erroring.
   DEPLOY="sudo-$NAME"
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
   REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
